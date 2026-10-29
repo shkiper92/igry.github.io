@@ -1,1 +1,432 @@
 
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Дворник: Очисти улицу</title>
+    <style>
+        body {
+            margin: 0; padding: 0;
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; background-color: #222;
+            font-family: Arial, sans-serif; overflow: hidden; color: white;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            width: 1000px; height: 600px;
+        }
+        canvas {
+            display: block;
+            background-image: url('bg.jpg');
+            background-size: cover; background-position: center;
+            background-color: #555;
+        }
+        #ui {
+            position: absolute; top: 10px; left: 10px; right: 10px;
+            display: flex; justify-content: space-between;
+            font-size: 26px; font-weight: bold;
+            text-shadow: 2px 2px 4px black, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+            pointer-events: none; z-index: 10;
+        }
+        #message {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9); padding: 30px 50px;
+            border-radius: 10px; text-align: center;
+            display: none; flex-direction: column; align-items: center;
+            z-index: 20; border: 2px solid #4CAF50; min-width: 300px;
+        }
+        #message h1 { margin: 0 0 10px 0; font-size: 28px;}
+        button {
+            padding: 12px 24px; font-size: 20px; cursor: pointer; margin-top: 20px;
+            background: #4CAF50; color: white; border: none;
+            border-radius: 5px; font-weight: bold; transition: background 0.2s;
+        }
+        button:hover { background: #45a049; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas" width="1000" height="600"></canvas>
+
+    <div id="ui">
+        <div>Уровень: <span id="level">1</span></div>
+        <div>Время: <span id="time">10</span>с</div>
+        <div>Мусор: <span id="trashCount">0</span></div>
+    </div>
+
+    <div id="message">
+        <h1 id="msgTitle">Игра</h1>
+        <button id="actionBtn" onclick="handleButtonClick()">Играть</button>
+        <!-- === НОВАЯ КНОПКА: Начать с 1 уровня (появляется при проигрыше) === -->
+        <button id="resetBtn" onclick="handleResetClick()" style="display:none; background:#666;">Начать с 1 уровня</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const timeEl = document.getElementById('time');
+    const trashCountEl = document.getElementById('trashCount');
+    const levelEl = document.getElementById('level');
+    const messageEl = document.getElementById('message');
+    const msgTitle = document.getElementById('msgTitle');
+    const actionBtn = document.getElementById('actionBtn');
+    const resetBtn = document.getElementById('resetBtn');   // === НОВОЕ ===
+
+    // === СКОРОСТЬ ДВОРНИКА ===
+    const PLAYER_SPEED = 3.2;
+
+    // Проверка картинки (не блокирует игру)
+    const testImg = new Image();
+    testImg.src = 'bg.jpg';
+    testImg.onerror = function() {
+        console.warn('ВНИМАНИЕ: Файл "bg.jpg" не найден. Игра работает, но фон будет серым.');
+    };
+
+    let gameActive = false;
+    let isWinState = false;
+    let currentLevel = 1;
+    let timeLeft = 10;
+    let timerInterval;
+    let walkCycle = 0;
+    let raiseHandsTimer = 0;
+
+    // Границы для мусора и котов
+    const GROUND_MIN_Y = 400;
+    const GROUND_MAX_Y = 590;
+    const GROUND_MIN_X = 20;
+    const GROUND_MAX_X = 980;
+
+    // Расширенные границы для игрока
+    const PLAYER_MIN_X = 20;
+    const PLAYER_MAX_X = 980;
+    const PLAYER_MIN_Y = 380;
+    const PLAYER_MAX_Y = 590;
+
+    let player = { x: 100, y: 550, speed: PLAYER_SPEED };
+    let trashes = [];
+    let cats = [];
+    let keys = {};
+
+    let levelConfig = {
+        trashCount: 8, catCount: 3, time: 10, catSpeed: 2.0, pushPower: 0.15
+    };
+
+    // === НАДЁЖНОЕ УПРАВЛЕНИЕ ===
+    const MOVE_CODES = ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD'];
+
+    window.addEventListener('keydown', e => {
+        if (MOVE_CODES.includes(e.code)) e.preventDefault();
+        keys[e.code] = true;
+    });
+
+    window.addEventListener('keyup', e => {
+        if (MOVE_CODES.includes(e.code)) e.preventDefault();
+        keys[e.code] = false;
+    });
+
+    // Сброс клавиш при потере фокуса окна
+    window.addEventListener('blur', () => {
+        for (const k in keys) keys[k] = false;
+    });
+
+    // --- КЛАСС МУСОРА ---
+    class Trash {
+        constructor(isOnCar = false) {
+            this.isOnCar = isOnCar;
+            this.size = Math.random() * 10 + 20;
+
+            if (isOnCar) {
+                this.x = 750 + Math.random() * 120;
+                this.y = 415 + Math.random() * 20;
+            } else {
+                this.x = Math.random() * (GROUND_MAX_X - GROUND_MIN_X) + GROUND_MIN_X;
+                this.y = Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y) + GROUND_MIN_Y;
+            }
+            this.vx = 0; this.vy = 0;
+            const types = ['🍌', '🥤', '📄', '🍎', '🥫', '📦'];
+            this.type = types[Math.floor(Math.random() * types.length)];
+        }
+        update() {
+            this.vx *= 0.85;
+            this.vy *= 0.85;
+
+            this.x += this.vx;
+            this.y += this.vy;
+
+            if (!this.isOnCar) {
+                if (this.x < GROUND_MIN_X) { this.x = GROUND_MIN_X; this.vx *= -1; }
+                if (this.x > GROUND_MAX_X) { this.x = GROUND_MAX_X; this.vx *= -1; }
+                if (this.y < GROUND_MIN_Y) { this.y = GROUND_MIN_Y; this.vy *= -1; }
+                if (this.y > GROUND_MAX_Y) { this.y = GROUND_MAX_Y; this.vy *= -1; }
+            }
+        }
+        draw() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+            ctx.beginPath();
+            ctx.ellipse(this.x, this.y + this.size/2, this.size/1.5, this.size/3, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#000';
+            ctx.font = `${this.size}px Arial`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText(this.type, this.x, this.y);
+        }
+    }
+
+    // --- КЛАСС КОТА ---
+    class Cat {
+        constructor(speed, pushPower) {
+            this.size = 35;
+            this.x = Math.random() * (GROUND_MAX_X - GROUND_MIN_X) + GROUND_MIN_X;
+            this.y = Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y) + GROUND_MIN_Y;
+            this.speed = speed;
+            this.pushPower = pushPower;
+            this.vx = (Math.random() - 0.5) * this.speed;
+            this.vy = (Math.random() - 0.5) * this.speed;
+        }
+        update() {
+            if (Math.random() < 0.02) {
+                this.vx = (Math.random() - 0.5) * this.speed;
+                this.vy = (Math.random() - 0.5) * this.speed;
+            }
+
+            this.x += this.vx;
+            this.y += this.vy;
+
+            if (this.x < GROUND_MIN_X) { this.x = GROUND_MIN_X; this.vx *= -1; }
+            if (this.x > GROUND_MAX_X) { this.x = GROUND_MAX_X; this.vx *= -1; }
+            if (this.y < GROUND_MIN_Y) { this.y = GROUND_MIN_Y; this.vy *= -1; }
+            if (this.y > GROUND_MAX_Y) { this.y = GROUND_MAX_Y; this.vy *= -1; }
+
+            trashes.forEach(trash => {
+                if (!trash.isOnCar) {
+                    let dist = Math.hypot(this.x - trash.x, this.y - trash.y);
+                    if (dist < this.size) {
+                        trash.vx += (trash.x - this.x) * this.pushPower;
+                        trash.vy += (trash.y - this.y) * this.pushPower;
+                    }
+                }
+            });
+        }
+        draw() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+            ctx.beginPath();
+            ctx.ellipse(this.x, this.y + 15, 20, 8, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#000';
+            ctx.font = "35px Arial";
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("🐈", this.x, this.y);
+        }
+    }
+
+    // --- НАСТРОЙКА УРОВНЯ ---
+    function setupLevel() {
+        levelConfig.trashCount = 6 + (currentLevel * 2);
+        levelConfig.catCount = Math.min(2 + currentLevel, 8);
+        levelConfig.time = 10;
+        levelConfig.catSpeed = 1.5 + (currentLevel * 0.7);
+        levelConfig.pushPower = 0.15 + (currentLevel * 0.05);
+
+        timeLeft = levelConfig.time;
+        trashes = []; cats = []; raiseHandsTimer = 0;
+
+        player.x = 100; player.y = 550;
+
+        for (let i = 0; i < 3; i++) trashes.push(new Trash(true));
+        for (let i = 3; i < levelConfig.trashCount; i++) trashes.push(new Trash(false));
+        for (let i = 0; i < levelConfig.catCount; i++) cats.push(new Cat(levelConfig.catSpeed, levelConfig.pushPower));
+
+        levelEl.innerText = currentLevel;
+        trashCountEl.innerText = trashes.length;
+        timeEl.innerText = Math.floor(timeLeft);
+
+        gameActive = true;
+        clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            if (gameActive) {
+                timeLeft--;
+                timeEl.innerText = Math.floor(timeLeft);
+                if (timeLeft <= 0) endGame(false);
+            }
+        }, 1000);
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    function startGame() {
+        messageEl.style.display = 'none';
+        resetBtn.style.display = 'none';   // === прячем кнопку сброса при старте уровня ===
+        actionBtn.blur();
+        resetBtn.blur();
+        setupLevel();
+    }
+
+    function endGame(isWin) {
+        gameActive = false; isWinState = isWin;
+        clearInterval(timerInterval);
+        messageEl.style.display = 'flex';
+        if (isWin) {
+            msgTitle.innerText = `🎉 Уровень ${currentLevel} пройден!`;
+            msgTitle.style.color = "#4CAF50";
+            actionBtn.innerText = "Следующий уровень";
+            resetBtn.style.display = 'none';   // при победе сброс не нужен
+        } else {
+            // === ПРОИГРЫШ: уровень не сбрасывается, предлагаем продолжить ===
+            msgTitle.innerText = `💀 Время вышло! Уровень ${currentLevel}`;
+            msgTitle.style.color = "#f44336";
+            actionBtn.innerText = `Продолжить (уровень ${currentLevel})`;
+            resetBtn.style.display = 'block';   // показываем «Начать с 1 уровня»
+        }
+    }
+
+    // === НОВАЯ ЛОГИКА КНОПОК ===
+    function handleButtonClick() {
+        // При победе — следующий уровень. При проигрыше — тот же уровень (продолжение).
+        if (isWinState) currentLevel++;
+        startGame();
+    }
+
+    function handleResetClick() {
+        currentLevel = 1;
+        startGame();
+    }
+
+    // --- ОТРИСОВКА ДВОРНИКА ---
+    function drawJanitor(x, y) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.beginPath(); ctx.ellipse(x, y + 5, 22, 10, 0, 0, Math.PI * 2); ctx.fill();
+
+        let legOffset = Math.sin(walkCycle) * 5;
+        ctx.fillStyle = "#2c3e50";
+        ctx.fillRect(x - 12, y - 25, 8, 25 + legOffset);
+        ctx.fillRect(x + 4, y - 25, 8, 25 - legOffset);
+        ctx.fillStyle = "#1a1a1a";
+        ctx.fillRect(x - 14, y - 2 + legOffset, 12, 6);
+        ctx.fillRect(x + 2, y - 2 - legOffset, 12, 6);
+
+        ctx.fillStyle = "#2980b9";
+        ctx.fillRect(x - 15, y - 60, 30, 35);
+        ctx.fillStyle = "#e67e22";
+        ctx.fillRect(x - 15, y - 60, 30, 35);
+
+        ctx.fillStyle = "#f1c40f";
+        ctx.fillRect(x - 15, y - 45, 30, 4);
+        ctx.fillRect(x - 15, y - 35, 30, 4);
+
+        ctx.fillStyle = "#f1c40f";
+        ctx.beginPath(); ctx.arc(x, y - 75, 12, 0, Math.PI * 2); ctx.fill();
+
+        ctx.fillStyle = "#c0392b";
+        ctx.beginPath(); ctx.arc(x, y - 80, 12, Math.PI, 0); ctx.fill();
+        ctx.fillRect(x, y - 80, 16, 4);
+
+        ctx.fillStyle = "#000";
+        ctx.beginPath(); ctx.arc(x + 5, y - 76, 1.5, 0, Math.PI * 2); ctx.fill();
+
+        if (raiseHandsTimer > 0) {
+            ctx.fillStyle = "#2980b9";
+            ctx.fillRect(x - 20, y - 80, 8, 20);
+            ctx.fillRect(x + 12, y - 80, 8, 20);
+
+            ctx.save();
+            ctx.translate(x + 25, y - 30); ctx.rotate(-Math.PI / 4);
+            ctx.strokeStyle = "#8e6b3e"; ctx.lineWidth = 5;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 60); ctx.stroke();
+            ctx.fillStyle = "#f1c40f";
+            ctx.beginPath();
+            ctx.moveTo(-15, 60); ctx.lineTo(15, 60); ctx.lineTo(20, 80); ctx.lineTo(-20, 80);
+            ctx.fill();
+            ctx.restore();
+
+            ctx.fillStyle = "#f1c40f"; ctx.font = "bold 30px Arial";
+            ctx.fillText("!", x, y - 100);
+            ctx.font = "20px Arial";
+        } else {
+            ctx.fillStyle = "#2980b9";
+            ctx.fillRect(x + 10, y - 55, 8, 20);
+
+            ctx.save();
+            ctx.translate(x + 15, y - 35); ctx.rotate(Math.PI / 6);
+            ctx.strokeStyle = "#8e6b3e"; ctx.lineWidth = 5;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 60); ctx.stroke();
+            ctx.fillStyle = "#f1c40f";
+            ctx.beginPath();
+            ctx.moveTo(-15, 60); ctx.lineTo(15, 60); ctx.lineTo(20, 80); ctx.lineTo(-20, 80);
+            ctx.fill();
+            ctx.strokeStyle = "#d35400"; ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(-10, 65); ctx.lineTo(10, 65);
+            ctx.moveTo(-15, 75); ctx.lineTo(15, 75);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    // --- ОБНОВЛЕНИЕ ЛОГИКИ ---
+    function update() {
+        if (!gameActive) return;
+
+        let dx = 0, dy = 0;
+        if (keys['ArrowUp'] || keys['KeyW']) dy -= 1;
+        if (keys['ArrowDown'] || keys['KeyS']) dy += 1;
+        if (keys['ArrowLeft'] || keys['KeyA']) dx -= 1;
+        if (keys['ArrowRight'] || keys['KeyD']) dx += 1;
+
+        if (dx !== 0 || dy !== 0) {
+            const len = Math.hypot(dx, dy);
+            player.x += (dx / len) * player.speed;
+            player.y += (dy / len) * player.speed;
+            walkCycle += 0.2;
+        } else {
+            walkCycle = 0;
+        }
+
+        if (player.x < PLAYER_MIN_X) player.x = PLAYER_MIN_X;
+        if (player.x > PLAYER_MAX_X) player.x = PLAYER_MAX_X;
+        if (player.y < PLAYER_MIN_Y) player.y = PLAYER_MIN_Y;
+        if (player.y > PLAYER_MAX_Y) player.y = PLAYER_MAX_Y;
+
+        for (let i = trashes.length - 1; i >= 0; i--) {
+            trashes[i].update();
+
+            let refY = trashes[i].isOnCar ? (player.y - 70) : (player.y - 20);
+            let radius = trashes[i].isOnCar ? 110 : 55;
+            let dist = Math.hypot(player.x - trashes[i].x, refY - trashes[i].y);
+
+            if (dist < radius) {
+                if (trashes[i].isOnCar) raiseHandsTimer = 60;
+                trashes.splice(i, 1);
+                trashCountEl.innerText = trashes.length;
+                if (trashes.length === 0) endGame(true);
+            }
+        }
+
+        cats.forEach(cat => cat.update());
+        if (raiseHandsTimer > 0) raiseHandsTimer--;
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        cats.forEach(cat => cat.draw());
+        trashes.forEach(trash => trash.draw());
+        drawJanitor(player.x, player.y);
+    }
+
+    function gameLoop() {
+        if (!gameActive) return;
+        update(); draw();
+        requestAnimationFrame(gameLoop);
+    }
+
+    window.onload = () => {
+        msgTitle.innerText = "Дворник: Очисти улицу";
+        actionBtn.innerText = "Начать игру";
+        resetBtn.style.display = 'none';
+        messageEl.style.display = 'flex';
+    };
+</script>
+</body>
+</html>
