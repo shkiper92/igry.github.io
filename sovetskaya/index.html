@@ -23,27 +23,13 @@
             -webkit-touch-callout: none;
         }
 
-        #game-screen {
+        canvas {
             position: fixed;
             top: 0; left: 0;
+            display: block;
             width: 100vw;
             height: 100vh;
             height: 100dvh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-        }
-
-        #game-container {
-            position: relative;
-            box-shadow: 0 0 30px rgba(0, 0, 0, 0.9);
-        }
-
-        canvas {
-            display: block;
-            width: min(100vw, calc(100vh * 5 / 3));
-            height: min(100vh, calc(100vw * 3 / 5));
             background-image: url('bg.jpg');
             background-size: cover;
             background-position: center;
@@ -52,8 +38,9 @@
         }
 
         #ui {
-            position: absolute;
-            top: 10px; left: 10px; right: 10px;
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            padding: 10px;
             display: flex;
             justify-content: space-between;
             font-size: clamp(13px, 2.4vw, 26px);
@@ -61,10 +48,11 @@
             text-shadow: 2px 2px 4px black, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
             pointer-events: none;
             z-index: 10;
+            box-sizing: border-box;
         }
 
         #message {
-            position: absolute;
+            position: fixed;
             top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             background: rgba(0, 0, 0, 0.92);
@@ -78,6 +66,7 @@
             border: 2px solid #4CAF50;
             min-width: 220px;
             max-width: 90%;
+            box-sizing: border-box;
         }
 
         #message h1 {
@@ -109,7 +98,7 @@
             position: fixed;
             left: 50%;
             transform: translateX(-50%);
-            bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+            bottom: calc(15px + env(safe-area-inset-bottom, 0px));
             display: none;
             grid-template-areas:
                 ".    up    ."
@@ -163,7 +152,7 @@
                 grid-template-columns: 58px 58px 58px;
                 grid-template-rows: 58px 58px 58px;
                 gap: 6px;
-                bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+                bottom: calc(10px + env(safe-area-inset-bottom, 0px));
             }
             .touch-btn { font-size: 22px; border-radius: 12px; }
         }
@@ -171,25 +160,20 @@
 </head>
 <body>
 
-<div id="game-screen">
-    <div id="game-container">
-        <canvas id="gameCanvas" width="1000" height="600"></canvas>
+<canvas id="gameCanvas"></canvas>
 
-        <div id="ui">
-            <div>Уровень: <span id="level">1</span></div>
-            <div>Время: <span id="time">12</span>с</div>
-            <div>Мусор: <span id="trashCount">0</span></div>
-        </div>
-
-        <div id="message">
-            <h1 id="msgTitle">Игра</h1>
-            <button id="actionBtn" onclick="handleButtonClick()">Играть</button>
-            <button id="resetBtn" onclick="handleResetClick()" style="display:none; background:#666;">Начать с 1 уровня</button>
-        </div>
-    </div>
+<div id="ui">
+    <div>Уровень: <span id="level">1</span></div>
+    <div>Время: <span id="time">12</span>с</div>
+    <div>Мусор: <span id="trashCount">0</span></div>
 </div>
 
-<!-- Экранное управление -->
+<div id="message">
+    <h1 id="msgTitle">Игра</h1>
+    <button id="actionBtn" onclick="handleButtonClick()">Играть</button>
+    <button id="resetBtn" onclick="handleResetClick()" style="display:none; background:#666;">Начать с 1 уровня</button>
+</div>
+
 <div id="touch-controls">
     <button class="touch-btn" data-key="ArrowUp"    style="grid-area: up;"    aria-label="Вверх">▲</button>
     <button class="touch-btn" data-key="ArrowLeft"  style="grid-area: left;"  aria-label="Влево">◀</button>
@@ -216,6 +200,14 @@
         console.warn('ВНИМАНИЕ: Файл "bg.jpg" не найден. Фон будет серым.');
     };
 
+    // === Мировые координаты (в CSS-пикселях экрана) ===
+    let VW = window.innerWidth;
+    let VH = window.innerHeight;
+
+    let GROUND_MIN_X, GROUND_MAX_X, GROUND_MIN_Y, GROUND_MAX_Y;
+    let PLAYER_MIN_X, PLAYER_MAX_X, PLAYER_MIN_Y, PLAYER_MAX_Y;
+    let CAR_X_MIN, CAR_X_MAX, CAR_Y_MIN, CAR_Y_MAX;
+
     let gameActive = false;
     let isWinState = false;
     let currentLevel = 1;
@@ -224,12 +216,7 @@
     let walkCycle = 0;
     let raiseHandsTimer = 0;
 
-    const GROUND_MIN_Y = 400, GROUND_MAX_Y = 590;
-    const GROUND_MIN_X = 20,  GROUND_MAX_X = 980;
-    const PLAYER_MIN_X = 20,  PLAYER_MAX_X = 980;
-    const PLAYER_MIN_Y = 380, PLAYER_MAX_Y = 590;
-
-    let player = { x: 100, y: 550, speed: PLAYER_SPEED };
+    let player = { x: 40, y: 500, speed: PLAYER_SPEED };
     let trashes = [];
     let cats = [];
     let keys = {};
@@ -237,6 +224,89 @@
     let levelConfig = {
         trashCount: 8, catCount: 3, time: 12, catSpeed: 2.0, pushPower: 0.15
     };
+
+    // ================== ТАЧ-ОПРЕДЕЛЕНИЕ ==================
+    function detectTouchDevice() {
+        try {
+            if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
+            if (window.matchMedia && window.matchMedia('(hover: none)').matches) return true;
+        } catch (e) {}
+        if ('ontouchstart' in window) return true;
+        if (navigator.maxTouchPoints > 0) return true;
+        if (navigator.msMaxTouchPoints > 0) return true;
+        if (/Android|iPhone|iPad|iPod|Mobile|Tablet|Touch/i.test(navigator.userAgent || '')) return true;
+        return false;
+    }
+    let isTouchDevice = detectTouchDevice();
+    document.addEventListener('touchstart', function enableOnFirstTouch() {
+        if (!isTouchDevice) {
+            isTouchDevice = true;
+            updateBounds();
+            if (gameActive) showTouchControls(true);
+        }
+        document.removeEventListener('touchstart', enableOnFirstTouch);
+    }, { once: true, passive: true });
+
+    const touchControls = document.getElementById('touch-controls');
+    function showTouchControls(v) {
+        if (!isTouchDevice) { touchControls.classList.remove('visible'); return; }
+        touchControls.classList.toggle('visible', v);
+    }
+
+    // ================== РАЗМЕР И ГРАНИЦЫ ==================
+    function resizeCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        VW = window.innerWidth;
+        VH = window.innerHeight;
+        canvas.width = Math.floor(VW * dpr);
+        canvas.height = Math.floor(VH * dpr);
+        canvas.style.width = VW + 'px';
+        canvas.style.height = VH + 'px';
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        updateBounds();
+        if (gameActive) clampObjects();
+    }
+
+    function updateBounds() {
+        // На тач-устройствах оставляем снизу место для экранных кнопок (~180px)
+        const SAFE_BOTTOM = isTouchDevice ? Math.max(160, Math.min(220, VH * 0.28)) : 15;
+        const SAFE_TOP = 15;
+
+        GROUND_MIN_X = 15;
+        GROUND_MAX_X = VW - 15;
+        GROUND_MIN_Y = VH * 0.55;
+        GROUND_MAX_Y = VH - SAFE_BOTTOM;
+
+        PLAYER_MIN_X = 15;
+        PLAYER_MAX_X = VW - 15;
+        PLAYER_MIN_Y = Math.max(VH * 0.4, SAFE_TOP + 100);
+        PLAYER_MAX_Y = VH - SAFE_BOTTOM;
+
+        // Машина с мусором — правый верх игровой зоны
+        const carWidth = Math.min(180, VW * 0.35);
+        CAR_X_MIN = VW - carWidth - 20;
+        CAR_X_MAX = VW - 30;
+        CAR_Y_MIN = GROUND_MIN_Y + 5;
+        CAR_Y_MAX = GROUND_MIN_Y + 30;
+    }
+
+    function clampObjects() {
+        player.x = Math.max(PLAYER_MIN_X, Math.min(PLAYER_MAX_X, player.x));
+        player.y = Math.max(PLAYER_MIN_Y, Math.min(PLAYER_MAX_Y, player.y));
+        trashes.forEach(t => {
+            if (t.isOnCar) {
+                t.x = Math.max(CAR_X_MIN, Math.min(CAR_X_MAX, t.x));
+                t.y = Math.max(CAR_Y_MIN, Math.min(CAR_Y_MAX, t.y));
+            } else {
+                t.x = Math.max(GROUND_MIN_X, Math.min(GROUND_MAX_X, t.x));
+                t.y = Math.max(GROUND_MIN_Y, Math.min(GROUND_MAX_Y, t.y));
+            }
+        });
+        cats.forEach(c => {
+            c.x = Math.max(GROUND_MIN_X, Math.min(GROUND_MAX_X, c.x));
+            c.y = Math.max(GROUND_MIN_Y, Math.min(GROUND_MAX_Y, c.y));
+        });
+    }
 
     // ================== КЛАВИАТУРА ==================
     const MOVE_CODES = ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD'];
@@ -249,60 +319,19 @@
         keys[e.code] = false;
     });
 
-    // ================== ТАЧ-УПРАВЛЕНИЕ ==================
-    const touchControls = document.getElementById('touch-controls');
-
-    // Многоступенчатая проверка тач-устройства
-    function detectTouchDevice() {
-        try {
-            if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
-            if (window.matchMedia && window.matchMedia('(hover: none)').matches) return true;
-        } catch (e) {}
-        if ('ontouchstart' in window) return true;
-        if (window.navigator && navigator.maxTouchPoints > 0) return true;
-        if (window.navigator && navigator.msMaxTouchPoints > 0) return true;
-        if (/Android|iPhone|iPad|iPod|Mobile|Tablet|Touch/i.test(navigator.userAgent || '')) return true;
-        return false;
-    }
-
-    let isTouchDevice = detectTouchDevice();
-
-    // Fallback: включаем кнопки после первого касания в любом месте
-    function enableTouchOnFirstTouch() {
-        document.addEventListener('touchstart', function onFirstTouch() {
-            if (!isTouchDevice) {
-                isTouchDevice = true;
-                console.log('[Janitor] Тач-устройство обнаружено при первом касании.');
-                if (gameActive) showTouchControls(true);
-            }
-            document.removeEventListener('touchstart', onFirstTouch);
-        }, { once: true, passive: true });
-    }
-    if (!isTouchDevice) enableTouchOnFirstTouch();
-
-    function showTouchControls(v) {
-        // Показываем кнопки только если это тач-устройство
-        if (!isTouchDevice) {
-            touchControls.classList.remove('visible');
-            return;
-        }
-        touchControls.classList.toggle('visible', v);
-    }
-
-    // Определяем поддерживаемые события (pointer / touch)
+    // ================== ТАЧ-КНОПКИ ==================
     const PTR_SUPPORTED = typeof window.PointerEvent !== 'undefined' && 'onpointerdown' in window;
     const DOWN_EVT = PTR_SUPPORTED ? 'pointerdown' : 'touchstart';
     const UP_EVT   = PTR_SUPPORTED ? 'pointerup'   : 'touchend';
     const CANCEL_EVT = PTR_SUPPORTED ? 'pointercancel' : 'touchcancel';
 
-    const activePointers = new Map(); // id -> button
+    const activePointers = new Map();
 
     function activateButton(btn) {
         keys[btn.dataset.key] = true;
         btn.classList.add('active');
     }
     function deactivateButton(btn) {
-        // Отпускаем только если эту кнопку больше не держит ни один палец
         const stillPressed = Array.from(activePointers.values()).includes(btn);
         if (!stillPressed) {
             keys[btn.dataset.key] = false;
@@ -325,27 +354,18 @@
     function handleUp(e) {
         if (PTR_SUPPORTED) {
             const btn = activePointers.get(e.pointerId);
-            if (btn) {
-                activePointers.delete(e.pointerId);
-                deactivateButton(btn);
-            }
-        } else {
-            if (e.changedTouches) {
-                for (let i = 0; i < e.changedTouches.length; i++) {
-                    const id = e.changedTouches[i].identifier;
-                    const btn = activePointers.get(id);
-                    if (btn) {
-                        activePointers.delete(id);
-                        deactivateButton(btn);
-                    }
-                }
+            if (btn) { activePointers.delete(e.pointerId); deactivateButton(btn); }
+        } else if (e.changedTouches) {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const id = e.changedTouches[i].identifier;
+                const btn = activePointers.get(id);
+                if (btn) { activePointers.delete(id); deactivateButton(btn); }
             }
         }
     }
     window.addEventListener(UP_EVT, handleUp, { passive: true });
     window.addEventListener(CANCEL_EVT, handleUp, { passive: true });
 
-    // Сброс всего управления при потере фокуса
     function resetAllControls() {
         for (const k in keys) keys[k] = false;
         activePointers.clear();
@@ -353,14 +373,14 @@
     }
     window.addEventListener('blur', resetAllControls);
 
-    // ================== ИГРОВЫЕ КЛАССЫ ==================
+    // ================== КЛАССЫ ==================
     class Trash {
         constructor(isOnCar = false) {
             this.isOnCar = isOnCar;
             this.size = Math.random() * 10 + 20;
             if (isOnCar) {
-                this.x = 750 + Math.random() * 120;
-                this.y = 415 + Math.random() * 20;
+                this.x = CAR_X_MIN + Math.random() * (CAR_X_MAX - CAR_X_MIN);
+                this.y = CAR_Y_MIN + Math.random() * (CAR_Y_MAX - CAR_Y_MIN);
             } else {
                 this.x = Math.random() * (GROUND_MAX_X - GROUND_MIN_X) + GROUND_MIN_X;
                 this.y = Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y) + GROUND_MIN_Y;
@@ -434,7 +454,10 @@
         }
     }
 
+    // ================== УРОВЕНЬ ==================
     function setupLevel() {
+        updateBounds();
+
         levelConfig.trashCount = 6 + (currentLevel * 2);
         levelConfig.catCount = Math.min(2 + currentLevel, 8);
         levelConfig.time = 12;
@@ -443,7 +466,10 @@
 
         timeLeft = levelConfig.time;
         trashes = []; cats = []; raiseHandsTimer = 0;
-        player.x = 100; player.y = 550;
+
+        // Игрок — левый нижний угол игровой зоны
+        player.x = PLAYER_MIN_X + 30;
+        player.y = PLAYER_MAX_Y - 10;
 
         for (let i = 0; i < 3; i++) trashes.push(new Trash(true));
         for (let i = 3; i < levelConfig.trashCount; i++) trashes.push(new Trash(false));
@@ -472,8 +498,6 @@
         actionBtn.blur();
         resetBtn.blur();
         resetAllControls();
-        // Показываем кнопки (если это тач-устройство)
-        // Небольшая задержка, чтобы браузер успел обработать нажатие "Играть"
         setTimeout(() => showTouchControls(true), 50);
         setupLevel();
     }
@@ -554,7 +578,6 @@
             ctx.restore();
             ctx.fillStyle = "#f1c40f"; ctx.font = "bold 30px Arial";
             ctx.fillText("!", x, y - 100);
-            ctx.font = "20px Arial";
         } else {
             ctx.fillStyle = "#2980b9";
             ctx.fillRect(x + 10, y - 55, 8, 20);
@@ -575,6 +598,7 @@
         }
     }
 
+    // ================== ЛОГИКА ==================
     function update() {
         if (!gameActive) return;
 
@@ -616,7 +640,7 @@
     }
 
     function draw() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.clearRect(0, 0, VW, VH);
         cats.forEach(cat => cat.draw());
         trashes.forEach(trash => trash.draw());
         drawJanitor(player.x, player.y);
@@ -628,15 +652,31 @@
         requestAnimationFrame(gameLoop);
     }
 
+    // ================== РЕСАЙЗ ==================
+    let resizeRaf = null;
+    function onResize() {
+        if (resizeRaf) cancelAnimationFrame(resizeRaf);
+        resizeRaf = requestAnimationFrame(() => {
+            resizeCanvas();
+            resizeRaf = null;
+        });
+    }
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', () => setTimeout(onResize, 200));
+
+    // ================== СТАРТ ==================
     window.onload = () => {
+        resizeCanvas();
         msgTitle.innerText = "Дворник: Очисти улицу";
         actionBtn.innerText = "Начать игру";
         resetBtn.style.display = 'none';
         messageEl.style.display = 'flex';
         showTouchControls(false);
-        console.log('[Janitor] Тач-устройство:', isTouchDevice,
+
+        console.log('[Janitor] VW×VH:', VW, VH,
+                    '| Тач:', isTouchDevice,
                     '| Pointer Events:', PTR_SUPPORTED,
-                    '| Касаний (maxTouchPoints):', navigator.maxTouchPoints);
+                    '| maxTouchPoints:', navigator.maxTouchPoints);
     };
 </script>
 </body>
