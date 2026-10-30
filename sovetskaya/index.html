@@ -23,22 +23,26 @@
             -webkit-touch-callout: none;
         }
 
-        canvas {
+        /* Обёртка на весь экран — фон гарантированно покрывает видимую область */
+        #game-wrapper {
             position: fixed;
-            top: 0; left: 0;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #333 url('bg.jpg') center center / cover no-repeat;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        /* Канвас прозрачный, заполняет обёртку */
+        canvas {
             display: block;
-            width: 100vw;
-            height: 100vh;
-            height: 100dvh;
-            background-image: url('bg.jpg');
-            background-size: cover;
-            background-position: center;
-            background-color: #555;
+            width: 100%;
+            height: 100%;
+            background: transparent;
             touch-action: none;
         }
 
         #ui {
-            position: fixed;
+            position: absolute;
             top: 0; left: 0; right: 0;
             padding: 10px;
             display: flex;
@@ -52,7 +56,7 @@
         }
 
         #message {
-            position: fixed;
+            position: absolute;
             top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             background: rgba(0, 0, 0, 0.92);
@@ -88,12 +92,9 @@
             touch-action: manipulation;
             font-family: inherit;
         }
+        #message button:hover { background: #45a049; }
 
-        #message button:hover {
-            background: #45a049;
-        }
-
-        /* === Экранные кнопки управления === */
+        /* Экранные кнопки */
         #touch-controls {
             position: fixed;
             left: 50%;
@@ -113,10 +114,7 @@
             touch-action: none;
             pointer-events: auto;
         }
-
-        #touch-controls.visible {
-            display: grid;
-        }
+        #touch-controls.visible { display: grid; }
 
         .touch-btn {
             background: rgba(76, 175, 80, 0.7);
@@ -140,7 +138,6 @@
             -webkit-touch-callout: none;
             font-family: inherit;
         }
-
         .touch-btn.active {
             background: rgba(76, 175, 80, 1);
             transform: scale(0.92);
@@ -160,18 +157,20 @@
 </head>
 <body>
 
-<canvas id="gameCanvas"></canvas>
+<div id="game-wrapper">
+    <canvas id="gameCanvas"></canvas>
 
-<div id="ui">
-    <div>Уровень: <span id="level">1</span></div>
-    <div>Время: <span id="time">12</span>с</div>
-    <div>Мусор: <span id="trashCount">0</span></div>
-</div>
+    <div id="ui">
+        <div>Уровень: <span id="level">1</span></div>
+        <div>Время: <span id="time">12</span>с</div>
+        <div>Мусор: <span id="trashCount">0</span></div>
+    </div>
 
-<div id="message">
-    <h1 id="msgTitle">Игра</h1>
-    <button id="actionBtn" onclick="handleButtonClick()">Играть</button>
-    <button id="resetBtn" onclick="handleResetClick()" style="display:none; background:#666;">Начать с 1 уровня</button>
+    <div id="message">
+        <h1 id="msgTitle">Игра</h1>
+        <button id="actionBtn" onclick="handleButtonClick()">Играть</button>
+        <button id="resetBtn" onclick="handleResetClick()" style="display:none; background:#666;">Начать с 1 уровня</button>
+    </div>
 </div>
 
 <div id="touch-controls">
@@ -194,16 +193,7 @@
 
     const PLAYER_SPEED = 3.2;
 
-    const testImg = new Image();
-    testImg.src = 'bg.jpg';
-    testImg.onerror = function() {
-        console.warn('ВНИМАНИЕ: Файл "bg.jpg" не найден. Фон будет серым.');
-    };
-
-    // === Мировые координаты (в CSS-пикселях экрана) ===
-    let VW = window.innerWidth;
-    let VH = window.innerHeight;
-
+    let VW = 360, VH = 640;
     let GROUND_MIN_X, GROUND_MAX_X, GROUND_MIN_Y, GROUND_MAX_Y;
     let PLAYER_MIN_X, PLAYER_MAX_X, PLAYER_MIN_Y, PLAYER_MAX_Y;
     let CAR_X_MIN, CAR_X_MAX, CAR_Y_MIN, CAR_Y_MAX;
@@ -225,7 +215,7 @@
         trashCount: 8, catCount: 3, time: 12, catSpeed: 2.0, pushPower: 0.15
     };
 
-    // ================== ТАЧ-ОПРЕДЕЛЕНИЕ ==================
+    // =============== ТАЧ-ОПРЕДЕЛЕНИЕ ===============
     function detectTouchDevice() {
         try {
             if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
@@ -253,36 +243,45 @@
         touchControls.classList.toggle('visible', v);
     }
 
-    // ================== РАЗМЕР И ГРАНИЦЫ ==================
+    // =============== РАЗМЕР И ГРАНИЦЫ ===============
     function resizeCanvas() {
+        // Реальный отрендеренный размер канваса в CSS-пикселях
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+
         const dpr = window.devicePixelRatio || 1;
-        VW = window.innerWidth;
-        VH = window.innerHeight;
+        VW = Math.round(rect.width);
+        VH = Math.round(rect.height);
+
         canvas.width = Math.floor(VW * dpr);
         canvas.height = Math.floor(VH * dpr);
-        canvas.style.width = VW + 'px';
-        canvas.style.height = VH + 'px';
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
         updateBounds();
         if (gameActive) clampObjects();
+
+        // Перерисовываем фон-сцену (если игра не активна — всё равно прорисуем последний кадр)
+        if (gameActive) {
+            // gameLoop сам перерисует
+        } else {
+            ctx.clearRect(0, 0, VW, VH);
+        }
     }
 
     function updateBounds() {
-        // На тач-устройствах оставляем снизу место для экранных кнопок (~180px)
         const SAFE_BOTTOM = isTouchDevice ? Math.max(160, Math.min(220, VH * 0.28)) : 15;
-        const SAFE_TOP = 15;
+        const SAFE_TOP = 60;
 
         GROUND_MIN_X = 15;
         GROUND_MAX_X = VW - 15;
-        GROUND_MIN_Y = VH * 0.55;
+        GROUND_MIN_Y = Math.max(VH * 0.55, SAFE_TOP + 100);
         GROUND_MAX_Y = VH - SAFE_BOTTOM;
 
         PLAYER_MIN_X = 15;
         PLAYER_MAX_X = VW - 15;
-        PLAYER_MIN_Y = Math.max(VH * 0.4, SAFE_TOP + 100);
+        PLAYER_MIN_Y = Math.max(VH * 0.4, SAFE_TOP + 120);
         PLAYER_MAX_Y = VH - SAFE_BOTTOM;
 
-        // Машина с мусором — правый верх игровой зоны
         const carWidth = Math.min(180, VW * 0.35);
         CAR_X_MIN = VW - carWidth - 20;
         CAR_X_MAX = VW - 30;
@@ -308,7 +307,7 @@
         });
     }
 
-    // ================== КЛАВИАТУРА ==================
+    // =============== КЛАВИАТУРА ===============
     const MOVE_CODES = ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD'];
     window.addEventListener('keydown', e => {
         if (MOVE_CODES.includes(e.code)) e.preventDefault();
@@ -319,7 +318,7 @@
         keys[e.code] = false;
     });
 
-    // ================== ТАЧ-КНОПКИ ==================
+    // =============== ТАЧ-КНОПКИ ===============
     const PTR_SUPPORTED = typeof window.PointerEvent !== 'undefined' && 'onpointerdown' in window;
     const DOWN_EVT = PTR_SUPPORTED ? 'pointerdown' : 'touchstart';
     const UP_EVT   = PTR_SUPPORTED ? 'pointerup'   : 'touchend';
@@ -373,7 +372,7 @@
     }
     window.addEventListener('blur', resetAllControls);
 
-    // ================== КЛАССЫ ==================
+    // =============== КЛАССЫ ===============
     class Trash {
         constructor(isOnCar = false) {
             this.isOnCar = isOnCar;
@@ -454,7 +453,7 @@
         }
     }
 
-    // ================== УРОВЕНЬ ==================
+    // =============== УРОВЕНЬ ===============
     function setupLevel() {
         updateBounds();
 
@@ -467,7 +466,6 @@
         timeLeft = levelConfig.time;
         trashes = []; cats = []; raiseHandsTimer = 0;
 
-        // Игрок — левый нижний угол игровой зоны
         player.x = PLAYER_MIN_X + 30;
         player.y = PLAYER_MAX_Y - 10;
 
@@ -498,7 +496,10 @@
         actionBtn.blur();
         resetBtn.blur();
         resetAllControls();
-        setTimeout(() => showTouchControls(true), 50);
+        setTimeout(() => {
+            resizeCanvas();
+            showTouchControls(true);
+        }, 50);
         setupLevel();
     }
 
@@ -531,7 +532,7 @@
         startGame();
     }
 
-    // ================== ОТРИСОВКА ДВОРНИКА ==================
+    // =============== ДВОРНИК ===============
     function drawJanitor(x, y) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.beginPath(); ctx.ellipse(x, y + 5, 22, 10, 0, 0, Math.PI * 2); ctx.fill();
@@ -598,7 +599,7 @@
         }
     }
 
-    // ================== ЛОГИКА ==================
+    // =============== ЛОГИКА ===============
     function update() {
         if (!gameActive) return;
 
@@ -652,21 +653,28 @@
         requestAnimationFrame(gameLoop);
     }
 
-    // ================== РЕСАЙЗ ==================
-    let resizeRaf = null;
-    function onResize() {
-        if (resizeRaf) cancelAnimationFrame(resizeRaf);
-        resizeRaf = requestAnimationFrame(() => {
-            resizeCanvas();
-            resizeRaf = null;
-        });
+    // =============== РЕСАЙЗ ===============
+    let resizeTimer = null;
+    function scheduleResize(delay) {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(resizeCanvas, delay || 60);
     }
-    window.addEventListener('resize', onResize);
-    window.addEventListener('orientationchange', () => setTimeout(onResize, 200));
+    window.addEventListener('resize', () => scheduleResize(60));
+    window.addEventListener('orientationchange', () => {
+        scheduleResize(100);
+        setTimeout(resizeCanvas, 350);
+    });
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => scheduleResize(60));
+        window.visualViewport.addEventListener('scroll', () => scheduleResize(60));
+    }
 
-    // ================== СТАРТ ==================
+    // =============== СТАРТ ===============
     window.onload = () => {
         resizeCanvas();
+        setTimeout(resizeCanvas, 100);
+        setTimeout(resizeCanvas, 400);
+
         msgTitle.innerText = "Дворник: Очисти улицу";
         actionBtn.innerText = "Начать игру";
         resetBtn.style.display = 'none';
@@ -675,8 +683,8 @@
 
         console.log('[Janitor] VW×VH:', VW, VH,
                     '| Тач:', isTouchDevice,
-                    '| Pointer Events:', PTR_SUPPORTED,
-                    '| maxTouchPoints:', navigator.maxTouchPoints);
+                    '| dpr:', window.devicePixelRatio,
+                    '| innerW/H:', window.innerWidth, window.innerHeight);
     };
 </script>
 </body>
