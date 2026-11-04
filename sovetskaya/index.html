@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Дворник: Очисти улицу</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -11,22 +11,29 @@
             background: #111; font-family: Arial, sans-serif; color: white;
             user-select: none; -webkit-user-select: none;
             -webkit-tap-highlight-color: transparent;
-            touch-action: none;
+            display: flex; justify-content: center; align-items: center;
+        }
+        #game-container {
+            position: relative;
+            width: 1000px; height: 600px;
+            transform-origin: center center;
+            box-shadow: 0 0 30px rgba(0,0,0,0.9);
+            border-radius: 6px;
+            overflow: hidden;
+            border: 2px solid #444;
         }
         #gameCanvas {
             display: block;
-            position: fixed;
-            top: 0; left: 0;
+            width: 100%; height: 100%;
             background-image: url('bg.jpg');
-            background-size: 100% 100%;
+            background-size: cover;
             background-position: center;
-            background-repeat: no-repeat;
             background-color: #555;
         }
         #ui {
-            position: fixed; top: 8px; left: 8px; right: 8px;
+            position: absolute; top: 10px; left: 10px; right: 10px;
             display: flex; justify-content: space-between;
-            font-size: clamp(14px, 2.5vw, 22px); font-weight: bold;
+            font-size: 26px; font-weight: bold;
             text-shadow: 2px 2px 4px black, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
             pointer-events: none; z-index: 10;
         }
@@ -40,96 +47,37 @@
             display: inline-block;
         }
         #message {
-            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(0,0,0,0.9); padding: 30px 50px;
             border-radius: 10px; text-align: center;
             display: none; flex-direction: column; align-items: center;
-            z-index: 20; border: 2px solid #4CAF50; min-width: 280px;
-            max-width: 90vw;
+            z-index: 20; border: 2px solid #4CAF50; min-width: 300px;
         }
-        #message h1 { margin: 0 0 10px 0; font-size: clamp(18px, 4vw, 28px); }
+        #message h1 { margin: 0 0 10px 0; font-size: 28px; }
         button {
-            padding: 12px 24px; font-size: clamp(16px, 3vw, 20px); cursor: pointer;
-            margin-top: 20px;
+            padding: 12px 24px; font-size: 20px; cursor: pointer; margin-top: 20px;
             background: #4CAF50; color: white; border: none;
-            border-radius: 5px; font-weight: bold;
+            border-radius: 5px; font-weight: bold; transition: background 0.2s;
         }
         button:hover { background: #45a049; }
-
-        /* Оверлей "Поверните устройство" */
-        #rotateOverlay {
-            position: fixed; inset: 0;
-            background: #0a0a0a;
-            display: none;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            z-index: 100;
-            text-align: center;
-            padding: 20px;
-        }
-        #rotateOverlay.show { display: flex; }
-        #rotateOverlay .phone-icon {
-            width: 80px; height: 140px;
-            border: 4px solid #4CAF50; border-radius: 12px;
-            position: relative;
-            margin-bottom: 30px;
-            animation: rotate-phone 2s ease-in-out infinite;
-        }
-        #rotateOverlay .phone-icon::after {
-            content: '';
-            position: absolute;
-            bottom: 8px; left: 50%; transform: translateX(-50%);
-            width: 30px; height: 4px; background: #4CAF50; border-radius: 2px;
-        }
-        @keyframes rotate-phone {
-            0%, 30% { transform: rotate(0deg); }
-            60%, 100% { transform: rotate(-90deg); }
-        }
-        #rotateOverlay h2 { color: #4CAF50; margin-bottom: 12px; font-size: 22px; }
-        #rotateOverlay p { color: #aaa; font-size: 15px; max-width: 320px; line-height: 1.5; }
-
-        /* Кнопка fullscreen */
-        #fullscreenBtn {
-            position: fixed;
-            bottom: 12px;
-            right: 12px;
-            padding: 8px 12px;
-            font-size: 12px;
-            background: rgba(0,0,0,0.6);
-            border: 1px solid #555;
-            color: #ccc;
-            border-radius: 4px;
-            z-index: 15;
-            cursor: pointer;
-            display: none;
-        }
-        #fullscreenBtn:hover { background: rgba(76,175,80,0.8); color: white; }
-        @media (pointer: coarse) { #fullscreenBtn { display: block; } }
     </style>
 </head>
 <body>
 
-<div id="rotateOverlay">
-    <div class="phone-icon"></div>
-    <h2>Поверните устройство</h2>
-    <p>Игра разработана для горизонтальной ориентации экрана. Поверните телефон и продолжайте.</p>
+<div id="game-container">
+    <canvas id="gameCanvas" width="1000" height="600"></canvas>
+
+    <div id="ui">
+        <div>Уровень: <span id="level">1</span></div>
+        <div>Время: <span id="time">18</span>с</div>
+        <div>Мусор: <span id="trashCount">0</span></div>
+    </div>
+
+    <div id="message">
+        <h1 id="msgTitle">Игра</h1>
+        <button id="actionBtn" onclick="handleButtonClick()">Играть</button>
+    </div>
 </div>
-
-<canvas id="gameCanvas"></canvas>
-
-<div id="ui">
-    <div>Уровень: <span id="level">1</span></div>
-    <div>Время: <span id="time">18</span>с</div>
-    <div>Мусор: <span id="trashCount">0</span></div>
-</div>
-
-<div id="message">
-    <h1 id="msgTitle">Игра</h1>
-    <button id="actionBtn" onclick="handleButtonClick()">Играть</button>
-</div>
-
-<button id="fullscreenBtn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
 
 <script>
     const canvas = document.getElementById('gameCanvas');
@@ -140,7 +88,23 @@
     const messageEl = document.getElementById('message');
     const msgTitle = document.getElementById('msgTitle');
     const actionBtn = document.getElementById('actionBtn');
-    const rotateOverlay = document.getElementById('rotateOverlay');
+
+    // ===== КОЭФФИЦИЕНТ РАЗМЕРА =====
+    // 1.0 — занимает 100% экрана (вписывание)
+    // 0.5 — занимает ~50% ширины экрана (по центру, с чёрными полями)
+    // 0.4 — ~40%, ещё меньше
+    // 0.7 — ~70%, крупнее
+    const SIZE_FACTOR = 0.5;
+
+    function fitGame() {
+        const container = document.getElementById('game-container');
+        // Вписываем по ширине/высоте, затем умножаем на SIZE_FACTOR
+        const baseScale = Math.min(window.innerWidth / 1000, window.innerHeight / 600);
+        const scale = baseScale * SIZE_FACTOR;
+        container.style.transform = `scale(${scale})`;
+    }
+    window.addEventListener('resize', fitGame);
+    window.addEventListener('orientationchange', () => setTimeout(fitGame, 100));
 
     const testImg = new Image();
     testImg.src = 'bg.jpg';
@@ -148,7 +112,17 @@
         alert('ВНИМАНИЕ: Файл "bg.jpg" не найден рядом с game.html!\n\nСохраните картинку с названием bg.jpg в ту же папку.');
     };
 
-    // ===== СОСТОЯНИЕ =====
+    // ===== ИГРОВЫЕ КОНСТАНТЫ (внутренние координаты 1000×600) =====
+    const GROUND_MIN_Y = 400;
+    const GROUND_MAX_Y = 590;
+    const GROUND_MIN_X = 20;
+    const GROUND_MAX_X = 980;
+
+    let player = { x: 100, y: 550, speed: 7.5 };
+    let trashes = [];
+    let cats = [];
+    let keys = {};
+
     let gameActive = false;
     let isWinState = false;
     let currentLevel = 1;
@@ -157,99 +131,17 @@
     let walkCycle = 0;
     let raiseHandsTimer = 0;
 
-    let SCALE = 1;
-    let GROUND_MIN_X = 0, GROUND_MAX_X = 0, GROUND_MIN_Y = 0, GROUND_MAX_Y = 0;
-
-    let player = { x: 100, y: 550, speed: 7.5 };
-    let trashes = [];
-    let cats = [];
-    let keys = {};
-
-    // ===== ОРИЕНТАЦИЯ =====
-    function isPortrait() {
-        return window.innerHeight > window.innerWidth;
-    }
-    function isMobile() {
-        return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-    }
-    function checkOrientation() {
-        if (isMobile() && isPortrait()) {
-            rotateOverlay.classList.add('show');
-            if (gameActive) {
-                gameActive = false;
-                clearInterval(timerInterval);
-            }
-            return false;
-        } else {
-            rotateOverlay.classList.remove('show');
-            return true;
-        }
-    }
-    async function lockLandscape() {
-        try {
-            if (screen.orientation && screen.orientation.lock) {
-                await screen.orientation.lock('landscape');
-            }
-        } catch (e) {
-            // Не критично, работает не везде без fullscreen
-        }
-    }
-    function toggleFullscreen() {
-        const el = document.documentElement;
-        if (!document.fullscreenElement) {
-            if (el.requestFullscreen) el.requestFullscreen();
-            else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-            setTimeout(lockLandscape, 200);
-        } else {
-            if (document.exitFullscreen) document.exitFullscreen();
-            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-        }
-    }
-
-    // ===== АДАПТАЦИЯ РАЗМЕРА =====
-    function resizeCanvas() {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        canvas.width = w;
-        canvas.height = h;
-        canvas.style.width = w + 'px';
-        canvas.style.height = h + 'px';
-
-        SCALE = w / 1000;
-        GROUND_MIN_X = w * 0.02;
-        GROUND_MAX_X = w * 0.98;
-        GROUND_MIN_Y = h * 0.68;
-        GROUND_MAX_Y = h * 0.95;
-        player.speed = 7.5 * SCALE;
-
-        player.x = Math.max(GROUND_MIN_X, Math.min(GROUND_MAX_X, player.x));
-        player.y = Math.max(GROUND_MIN_Y + 40 * SCALE, Math.min(GROUND_MAX_Y, player.y));
-    }
-
-    window.addEventListener('resize', () => {
-        resizeCanvas();
-        if (checkOrientation() && !gameActive) {
-            // если повернули в landscape на паузе, оверлей стартовый уже показан
-        }
-    });
-    window.addEventListener('orientationchange', () => {
-        setTimeout(() => {
-            resizeCanvas();
-            checkOrientation();
-        }, 150);
-    });
-
     window.addEventListener('keydown', e => keys[e.key] = true);
     window.addEventListener('keyup', e => keys[e.key] = false);
 
-    // ===== КЛАССЫ =====
+    // ===== КЛАСС МУСОРА =====
     class Trash {
         constructor(isOnCar = false) {
             this.isOnCar = isOnCar;
-            this.size = (Math.random() * 10 + 20) * SCALE;
+            this.size = Math.random() * 10 + 20;
             if (isOnCar) {
-                this.x = canvas.width * (0.74 + Math.random() * 0.13);
-                this.y = canvas.height * (0.66 + Math.random() * 0.08);
+                this.x = 750 + Math.random() * 120;
+                this.y = 415 + Math.random() * 20;
             } else {
                 this.x = Math.random() * (GROUND_MAX_X - GROUND_MIN_X) + GROUND_MIN_X;
                 this.y = Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y) + GROUND_MIN_Y;
@@ -282,9 +174,10 @@
         }
     }
 
+    // ===== КЛАСС КОТА =====
     class Cat {
         constructor(speed, pushPower) {
-            this.size = 35 * SCALE;
+            this.size = 35;
             this.x = Math.random() * (GROUND_MAX_X - GROUND_MIN_X) + GROUND_MIN_X;
             this.y = Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y) + GROUND_MIN_Y;
             this.speed = speed;
@@ -316,10 +209,10 @@
         draw() {
             ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
             ctx.beginPath();
-            ctx.ellipse(this.x, this.y + 15 * SCALE, 20 * SCALE, 8 * SCALE, 0, 0, Math.PI * 2);
+            ctx.ellipse(this.x, this.y + 15, 20, 8, 0, 0, Math.PI * 2);
             ctx.fill();
             ctx.fillStyle = '#000';
-            ctx.font = `${35 * SCALE}px Arial`;
+            ctx.font = "35px Arial";
             ctx.textAlign = "center"; ctx.textBaseline = "middle";
             ctx.fillText("🐈", this.x, this.y);
         }
@@ -331,15 +224,15 @@
             time: 18 + ((currentLevel - 1) * 3),
             trashCount: 8 + (currentLevel * 4),
             catCount: Math.min(2 + currentLevel, 7),
-            catSpeed: (2.2 + (currentLevel * 0.6)) * SCALE,
+            catSpeed: 2.2 + (currentLevel * 0.6),
             pushPower: 0.2 + (currentLevel * 0.05)
         };
 
         timeLeft = levelConfig.time;
         trashes = []; cats = []; raiseHandsTimer = 0;
 
-        player.x = GROUND_MIN_X + 50 * SCALE;
-        player.y = GROUND_MAX_Y;
+        player.x = 100;
+        player.y = 550;
 
         for (let i = 0; i < 2; i++) trashes.push(new Trash(true));
         for (let i = 2; i < levelConfig.trashCount; i++) trashes.push(new Trash(false));
@@ -366,8 +259,6 @@
     }
 
     function startGame() {
-        if (!checkOrientation()) return;
-        lockLandscape();
         messageEl.style.display = 'none';
         setupLevel();
     }
@@ -395,71 +286,70 @@
 
     // ===== ДВОРНИК =====
     function drawJanitor(x, y) {
-        const s = SCALE;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.beginPath(); ctx.ellipse(x, y + 5*s, 22*s, 10*s, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(x, y + 5, 22, 10, 0, 0, Math.PI * 2); ctx.fill();
 
-        let legOffset = Math.sin(walkCycle) * 5 * s;
+        let legOffset = Math.sin(walkCycle) * 5;
         ctx.fillStyle = "#2c3e50";
-        ctx.fillRect(x - 12*s, y - 25*s, 8*s, 25*s + legOffset);
-        ctx.fillRect(x + 4*s, y - 25*s, 8*s, 25*s - legOffset);
+        ctx.fillRect(x - 12, y - 25, 8, 25 + legOffset);
+        ctx.fillRect(x + 4, y - 25, 8, 25 - legOffset);
         ctx.fillStyle = "#1a1a1a";
-        ctx.fillRect(x - 14*s, y - 2*s + legOffset, 12*s, 6*s);
-        ctx.fillRect(x + 2*s, y - 2*s - legOffset, 12*s, 6*s);
+        ctx.fillRect(x - 14, y - 2 + legOffset, 12, 6);
+        ctx.fillRect(x + 2, y - 2 - legOffset, 12, 6);
 
         ctx.fillStyle = "#2980b9";
-        ctx.fillRect(x - 15*s, y - 60*s, 30*s, 35*s);
+        ctx.fillRect(x - 15, y - 60, 30, 35);
         ctx.fillStyle = "#e67e22";
-        ctx.fillRect(x - 15*s, y - 60*s, 30*s, 35*s);
+        ctx.fillRect(x - 15, y - 60, 30, 35);
         ctx.fillStyle = "#f1c40f";
-        ctx.fillRect(x - 15*s, y - 45*s, 30*s, 4*s);
-        ctx.fillRect(x - 15*s, y - 35*s, 30*s, 4*s);
+        ctx.fillRect(x - 15, y - 45, 30, 4);
+        ctx.fillRect(x - 15, y - 35, 30, 4);
 
         ctx.fillStyle = "#f1c40f";
-        ctx.beginPath(); ctx.arc(x, y - 75*s, 12*s, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y - 75, 12, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = "#c0392b";
-        ctx.beginPath(); ctx.arc(x, y - 80*s, 12*s, Math.PI, 0); ctx.fill();
-        ctx.fillRect(x, y - 80*s, 16*s, 4*s);
+        ctx.beginPath(); ctx.arc(x, y - 80, 12, Math.PI, 0); ctx.fill();
+        ctx.fillRect(x, y - 80, 16, 4);
         ctx.fillStyle = "#000";
-        ctx.beginPath(); ctx.arc(x + 5*s, y - 76*s, 1.5*s, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x + 5, y - 76, 1.5, 0, Math.PI * 2); ctx.fill();
 
         if (raiseHandsTimer > 0) {
             ctx.fillStyle = "#2980b9";
-            ctx.fillRect(x - 20*s, y - 80*s, 8*s, 20*s);
-            ctx.fillRect(x + 12*s, y - 80*s, 8*s, 20*s);
+            ctx.fillRect(x - 20, y - 80, 8, 20);
+            ctx.fillRect(x + 12, y - 80, 8, 20);
             ctx.save();
-            ctx.translate(x + 25*s, y - 30*s); ctx.rotate(-Math.PI / 4);
-            ctx.strokeStyle = "#8e6b3e"; ctx.lineWidth = 5*s;
-            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 60*s); ctx.stroke();
+            ctx.translate(x + 25, y - 30); ctx.rotate(-Math.PI / 4);
+            ctx.strokeStyle = "#8e6b3e"; ctx.lineWidth = 5;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 60); ctx.stroke();
             ctx.fillStyle = "#f1c40f";
             ctx.beginPath();
-            ctx.moveTo(-15*s, 60*s); ctx.lineTo(15*s, 60*s); ctx.lineTo(20*s, 80*s); ctx.lineTo(-20*s, 80*s);
+            ctx.moveTo(-15, 60); ctx.lineTo(15, 60); ctx.lineTo(20, 80); ctx.lineTo(-20, 80);
             ctx.fill();
             ctx.restore();
-            ctx.fillStyle = "#f1c40f"; ctx.font = `bold ${30*s}px Arial`;
+            ctx.fillStyle = "#f1c40f"; ctx.font = "bold 30px Arial";
             ctx.textAlign = "center";
-            ctx.fillText("!", x, y - 100*s);
+            ctx.fillText("!", x, y - 100);
         } else {
             ctx.fillStyle = "#2980b9";
-            ctx.fillRect(x + 10*s, y - 55*s, 8*s, 20*s);
+            ctx.fillRect(x + 10, y - 55, 8, 20);
             ctx.save();
-            ctx.translate(x + 15*s, y - 35*s); ctx.rotate(Math.PI / 6);
-            ctx.strokeStyle = "#8e6b3e"; ctx.lineWidth = 5*s;
-            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 60*s); ctx.stroke();
+            ctx.translate(x + 15, y - 35); ctx.rotate(Math.PI / 6);
+            ctx.strokeStyle = "#8e6b3e"; ctx.lineWidth = 5;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 60); ctx.stroke();
             ctx.fillStyle = "#f1c40f";
             ctx.beginPath();
-            ctx.moveTo(-15*s, 60*s); ctx.lineTo(15*s, 60*s); ctx.lineTo(20*s, 80*s); ctx.lineTo(-20*s, 80*s);
+            ctx.moveTo(-15, 60); ctx.lineTo(15, 60); ctx.lineTo(20, 80); ctx.lineTo(-20, 80);
             ctx.fill();
-            ctx.strokeStyle = "#d35400"; ctx.lineWidth = 2*s;
+            ctx.strokeStyle = "#d35400"; ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(-10*s, 65*s); ctx.lineTo(10*s, 65*s);
-            ctx.moveTo(-15*s, 75*s); ctx.lineTo(15*s, 75*s);
+            ctx.moveTo(-10, 65); ctx.lineTo(10, 65);
+            ctx.moveTo(-15, 75); ctx.lineTo(15, 75);
             ctx.stroke();
             ctx.restore();
         }
     }
 
-    // ===== ИГРОВОЙ ЦИКЛ =====
+    // ===== ОБНОВЛЕНИЕ =====
     function update() {
         if (!gameActive) return;
 
@@ -473,13 +363,13 @@
 
         if (player.x < GROUND_MIN_X) player.x = GROUND_MIN_X;
         if (player.x > GROUND_MAX_X) player.x = GROUND_MAX_X;
-        if (player.y < GROUND_MIN_Y + 40 * SCALE) player.y = GROUND_MIN_Y + 40 * SCALE;
+        if (player.y < GROUND_MIN_Y + 40) player.y = GROUND_MIN_Y + 40;
         if (player.y > GROUND_MAX_Y) player.y = GROUND_MAX_Y;
 
         for (let i = trashes.length - 1; i >= 0; i--) {
             trashes[i].update();
-            let refY = trashes[i].isOnCar ? (player.y - 70 * SCALE) : (player.y - 20 * SCALE);
-            let radius = trashes[i].isOnCar ? 100 * SCALE : 50 * SCALE;
+            let refY = trashes[i].isOnCar ? (player.y - 70) : (player.y - 20);
+            let radius = trashes[i].isOnCar ? 100 : 50;
             let dist = Math.hypot(player.x - trashes[i].x, refY - trashes[i].y);
             if (dist < radius) {
                 if (trashes[i].isOnCar) raiseHandsTimer = 60;
@@ -508,11 +398,11 @@
 
     // ===== СТАРТ =====
     window.onload = () => {
-        resizeCanvas();
-        checkOrientation();
+        fitGame();
         msgTitle.innerText = "Дворник: Очисти улицу";
         actionBtn.innerText = "Начать игру";
         messageEl.style.display = 'flex';
+        drawJanitor(player.x, player.y);
     };
 </script>
 </body>
