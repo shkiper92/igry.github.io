@@ -2,13 +2,13 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Дворник: Очисти улицу</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
             width: 100%; height: 100%; overflow: hidden;
-            background: #222; font-family: Arial, sans-serif; color: white;
+            background: #111; font-family: Arial, sans-serif; color: white;
             user-select: none; -webkit-user-select: none;
             -webkit-tap-highlight-color: transparent;
             touch-action: none;
@@ -55,19 +55,81 @@
             border-radius: 5px; font-weight: bold;
         }
         button:hover { background: #45a049; }
+
+        /* Оверлей "Поверните устройство" */
+        #rotateOverlay {
+            position: fixed; inset: 0;
+            background: #0a0a0a;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            text-align: center;
+            padding: 20px;
+        }
+        #rotateOverlay.show { display: flex; }
+        #rotateOverlay .phone-icon {
+            width: 80px; height: 140px;
+            border: 4px solid #4CAF50; border-radius: 12px;
+            position: relative;
+            margin-bottom: 30px;
+            animation: rotate-phone 2s ease-in-out infinite;
+        }
+        #rotateOverlay .phone-icon::after {
+            content: '';
+            position: absolute;
+            bottom: 8px; left: 50%; transform: translateX(-50%);
+            width: 30px; height: 4px; background: #4CAF50; border-radius: 2px;
+        }
+        @keyframes rotate-phone {
+            0%, 30% { transform: rotate(0deg); }
+            60%, 100% { transform: rotate(-90deg); }
+        }
+        #rotateOverlay h2 { color: #4CAF50; margin-bottom: 12px; font-size: 22px; }
+        #rotateOverlay p { color: #aaa; font-size: 15px; max-width: 320px; line-height: 1.5; }
+
+        /* Кнопка fullscreen */
+        #fullscreenBtn {
+            position: fixed;
+            bottom: 12px;
+            right: 12px;
+            padding: 8px 12px;
+            font-size: 12px;
+            background: rgba(0,0,0,0.6);
+            border: 1px solid #555;
+            color: #ccc;
+            border-radius: 4px;
+            z-index: 15;
+            cursor: pointer;
+            display: none;
+        }
+        #fullscreenBtn:hover { background: rgba(76,175,80,0.8); color: white; }
+        @media (pointer: coarse) { #fullscreenBtn { display: block; } }
     </style>
 </head>
 <body>
+
+<div id="rotateOverlay">
+    <div class="phone-icon"></div>
+    <h2>Поверните устройство</h2>
+    <p>Игра разработана для горизонтальной ориентации экрана. Поверните телефон и продолжайте.</p>
+</div>
+
 <canvas id="gameCanvas"></canvas>
+
 <div id="ui">
     <div>Уровень: <span id="level">1</span></div>
     <div>Время: <span id="time">18</span>с</div>
     <div>Мусор: <span id="trashCount">0</span></div>
 </div>
+
 <div id="message">
     <h1 id="msgTitle">Игра</h1>
     <button id="actionBtn" onclick="handleButtonClick()">Играть</button>
 </div>
+
+<button id="fullscreenBtn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
 
 <script>
     const canvas = document.getElementById('gameCanvas');
@@ -78,13 +140,15 @@
     const messageEl = document.getElementById('message');
     const msgTitle = document.getElementById('msgTitle');
     const actionBtn = document.getElementById('actionBtn');
+    const rotateOverlay = document.getElementById('rotateOverlay');
 
     const testImg = new Image();
     testImg.src = 'bg.jpg';
     testImg.onerror = function() {
-        alert('ВНИМАНИЕ: Файл "bg.jpg" не найден в папке с игрой!\n\nСохраните картинку с названием bg.jpg рядом с game.html');
+        alert('ВНИМАНИЕ: Файл "bg.jpg" не найден рядом с game.html!\n\nСохраните картинку с названием bg.jpg в ту же папку.');
     };
 
+    // ===== СОСТОЯНИЕ =====
     let gameActive = false;
     let isWinState = false;
     let currentLevel = 1;
@@ -93,7 +157,6 @@
     let walkCycle = 0;
     let raiseHandsTimer = 0;
 
-    // Коэффициент масштаба и границы игрового поля
     let SCALE = 1;
     let GROUND_MIN_X = 0, GROUND_MAX_X = 0, GROUND_MIN_Y = 0, GROUND_MAX_Y = 0;
 
@@ -102,6 +165,48 @@
     let cats = [];
     let keys = {};
 
+    // ===== ОРИЕНТАЦИЯ =====
+    function isPortrait() {
+        return window.innerHeight > window.innerWidth;
+    }
+    function isMobile() {
+        return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    }
+    function checkOrientation() {
+        if (isMobile() && isPortrait()) {
+            rotateOverlay.classList.add('show');
+            if (gameActive) {
+                gameActive = false;
+                clearInterval(timerInterval);
+            }
+            return false;
+        } else {
+            rotateOverlay.classList.remove('show');
+            return true;
+        }
+    }
+    async function lockLandscape() {
+        try {
+            if (screen.orientation && screen.orientation.lock) {
+                await screen.orientation.lock('landscape');
+            }
+        } catch (e) {
+            // Не критично, работает не везде без fullscreen
+        }
+    }
+    function toggleFullscreen() {
+        const el = document.documentElement;
+        if (!document.fullscreenElement) {
+            if (el.requestFullscreen) el.requestFullscreen();
+            else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+            setTimeout(lockLandscape, 200);
+        } else {
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        }
+    }
+
+    // ===== АДАПТАЦИЯ РАЗМЕРА =====
     function resizeCanvas() {
         const w = window.innerWidth;
         const h = window.innerHeight;
@@ -117,24 +222,32 @@
         GROUND_MAX_Y = h * 0.95;
         player.speed = 7.5 * SCALE;
 
-        // Не даём игроку выйти за новые границы
         player.x = Math.max(GROUND_MIN_X, Math.min(GROUND_MAX_X, player.x));
         player.y = Math.max(GROUND_MIN_Y + 40 * SCALE, Math.min(GROUND_MAX_Y, player.y));
     }
 
-    window.addEventListener('resize', resizeCanvas);
-    window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 100));
-    resizeCanvas();
+    window.addEventListener('resize', () => {
+        resizeCanvas();
+        if (checkOrientation() && !gameActive) {
+            // если повернули в landscape на паузе, оверлей стартовый уже показан
+        }
+    });
+    window.addEventListener('orientationchange', () => {
+        setTimeout(() => {
+            resizeCanvas();
+            checkOrientation();
+        }, 150);
+    });
 
     window.addEventListener('keydown', e => keys[e.key] = true);
     window.addEventListener('keyup', e => keys[e.key] = false);
 
+    // ===== КЛАССЫ =====
     class Trash {
         constructor(isOnCar = false) {
             this.isOnCar = isOnCar;
             this.size = (Math.random() * 10 + 20) * SCALE;
             if (isOnCar) {
-                // На крыше фургона — процент от размеров холста
                 this.x = canvas.width * (0.74 + Math.random() * 0.13);
                 this.y = canvas.height * (0.66 + Math.random() * 0.08);
             } else {
@@ -212,6 +325,7 @@
         }
     }
 
+    // ===== УРОВЕНЬ =====
     function setupLevel() {
         const levelConfig = {
             time: 18 + ((currentLevel - 1) * 3),
@@ -252,6 +366,8 @@
     }
 
     function startGame() {
+        if (!checkOrientation()) return;
+        lockLandscape();
         messageEl.style.display = 'none';
         setupLevel();
     }
@@ -277,6 +393,7 @@
         startGame();
     }
 
+    // ===== ДВОРНИК =====
     function drawJanitor(x, y) {
         const s = SCALE;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
@@ -294,18 +411,15 @@
         ctx.fillRect(x - 15*s, y - 60*s, 30*s, 35*s);
         ctx.fillStyle = "#e67e22";
         ctx.fillRect(x - 15*s, y - 60*s, 30*s, 35*s);
-
         ctx.fillStyle = "#f1c40f";
         ctx.fillRect(x - 15*s, y - 45*s, 30*s, 4*s);
         ctx.fillRect(x - 15*s, y - 35*s, 30*s, 4*s);
 
         ctx.fillStyle = "#f1c40f";
         ctx.beginPath(); ctx.arc(x, y - 75*s, 12*s, 0, Math.PI * 2); ctx.fill();
-
         ctx.fillStyle = "#c0392b";
         ctx.beginPath(); ctx.arc(x, y - 80*s, 12*s, Math.PI, 0); ctx.fill();
         ctx.fillRect(x, y - 80*s, 16*s, 4*s);
-
         ctx.fillStyle = "#000";
         ctx.beginPath(); ctx.arc(x + 5*s, y - 76*s, 1.5*s, 0, Math.PI * 2); ctx.fill();
 
@@ -313,7 +427,6 @@
             ctx.fillStyle = "#2980b9";
             ctx.fillRect(x - 20*s, y - 80*s, 8*s, 20*s);
             ctx.fillRect(x + 12*s, y - 80*s, 8*s, 20*s);
-
             ctx.save();
             ctx.translate(x + 25*s, y - 30*s); ctx.rotate(-Math.PI / 4);
             ctx.strokeStyle = "#8e6b3e"; ctx.lineWidth = 5*s;
@@ -323,14 +436,12 @@
             ctx.moveTo(-15*s, 60*s); ctx.lineTo(15*s, 60*s); ctx.lineTo(20*s, 80*s); ctx.lineTo(-20*s, 80*s);
             ctx.fill();
             ctx.restore();
-
             ctx.fillStyle = "#f1c40f"; ctx.font = `bold ${30*s}px Arial`;
             ctx.textAlign = "center";
             ctx.fillText("!", x, y - 100*s);
         } else {
             ctx.fillStyle = "#2980b9";
             ctx.fillRect(x + 10*s, y - 55*s, 8*s, 20*s);
-
             ctx.save();
             ctx.translate(x + 15*s, y - 35*s); ctx.rotate(Math.PI / 6);
             ctx.strokeStyle = "#8e6b3e"; ctx.lineWidth = 5*s;
@@ -348,11 +459,11 @@
         }
     }
 
+    // ===== ИГРОВОЙ ЦИКЛ =====
     function update() {
         if (!gameActive) return;
 
         let isMoving = false;
-
         if (keys['ArrowUp'] || keys['w'] || keys['W']) { player.y -= player.speed; isMoving = true; }
         if (keys['ArrowDown'] || keys['s'] || keys['S']) { player.y += player.speed; isMoving = true; }
         if (keys['ArrowLeft'] || keys['a'] || keys['A']) { player.x -= player.speed; isMoving = true; }
@@ -370,7 +481,6 @@
             let refY = trashes[i].isOnCar ? (player.y - 70 * SCALE) : (player.y - 20 * SCALE);
             let radius = trashes[i].isOnCar ? 100 * SCALE : 50 * SCALE;
             let dist = Math.hypot(player.x - trashes[i].x, refY - trashes[i].y);
-
             if (dist < radius) {
                 if (trashes[i].isOnCar) raiseHandsTimer = 60;
                 trashes.splice(i, 1);
@@ -396,8 +506,10 @@
         requestAnimationFrame(gameLoop);
     }
 
+    // ===== СТАРТ =====
     window.onload = () => {
         resizeCanvas();
+        checkOrientation();
         msgTitle.innerText = "Дворник: Очисти улицу";
         actionBtn.innerText = "Начать игру";
         messageEl.style.display = 'flex';
