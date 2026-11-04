@@ -13,12 +13,7 @@
             -webkit-tap-highlight-color: transparent;
             touch-action: none;
         }
-        #gameCanvas {
-            display: block;
-            position: fixed;
-            top: 0; left: 0;
-            background-color: #222;
-        }
+        #gameCanvas { display: block; position: fixed; top: 0; left: 0; background-color: #222; }
         #ui {
             position: fixed; top: 8px; left: 8px; right: 8px;
             display: flex; justify-content: space-between;
@@ -31,26 +26,32 @@
             50% { color: #ff3333; transform: scale(1.15); }
             100% { color: white; transform: scale(1); }
         }
-        .time-warning {
-            animation: pulse-red 0.4s infinite;
-            display: inline-block;
-        }
+        .time-warning { animation: pulse-red 0.4s infinite; display: inline-block; }
         #message {
             position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(0,0,0,0.9); padding: 30px 50px;
             border-radius: 10px; text-align: center;
             display: none; flex-direction: column; align-items: center;
-            z-index: 20; border: 2px solid #4CAF50; min-width: 280px;
-            max-width: 90vw;
+            z-index: 20; border: 2px solid #4CAF50; min-width: 280px; max-width: 90vw;
         }
-        #message h1 { margin: 0 0 10px 0; font-size: clamp(18px, 4vw, 28px); }
+        #message h1 {
+            margin: 0 0 10px 0; font-size: clamp(18px, 4vw, 28px);
+            white-space: pre-line; line-height: 1.3;
+        }
         button {
             padding: 12px 24px; font-size: clamp(16px, 3vw, 20px); cursor: pointer;
-            margin-top: 20px;
-            background: #4CAF50; color: white; border: none;
-            border-radius: 5px; font-weight: bold;
+            margin-top: 20px; background: #4CAF50; color: white;
+            border: none; border-radius: 5px; font-weight: bold;
         }
         button:hover { background: #45a049; }
+        #resetBtn {
+            margin-top: 12px; padding: 6px 14px;
+            font-size: clamp(11px, 2vw, 14px);
+            background: transparent; color: #888;
+            border: 1px solid #444; border-radius: 4px;
+            cursor: pointer; font-weight: normal;
+        }
+        #resetBtn:hover { color: #ccc; background: #222; }
     </style>
 </head>
 <body>
@@ -59,27 +60,44 @@
 
 <div id="ui">
     <div>Уровень: <span id="level">1</span></div>
-    <div>Время: <span id="time">18</span>с</div>
+    <div>Время: <span id="time">12</span>с</div>
     <div>Мусор: <span id="trashCount">0</span></div>
 </div>
 
 <div id="message">
     <h1 id="msgTitle">Игра</h1>
     <button id="actionBtn" onclick="handleButtonClick()">Играть</button>
+    <button id="resetBtn" onclick="resetProgress()" style="display:none;">🔄 Начать с 1-го уровня</button>
 </div>
 
 <script>
-    // ============================================================
-    // ⚙️ НАСТРОЙКИ ФОНА
-    // ============================================================
-    // 'cover'   — картинка заполняет весь экран без искажений (края обрезаются) — по умолчанию
-    // 'contain' — вся картинка видна без искажений (с чёрными полями по краям)
-    // 'stretch' — растягивает на весь экран (могут быть искажения — как было раньше)
     const BG_FIT_MODE = 'cover';
+    const LEVEL_TIME = 12;
+    const STORAGE_KEY = 'dvornik_saved_level';
 
-    // ============================================================
-    // 1. ПЕРЕМЕННЫЕ
-    // ============================================================
+    const SNOW_SPAWN_RATE = 6;
+    const SNOW_CLUMP_SIZE = 2;
+    const SNOW_FALL_SPEED = 3.5;
+
+    // ❄️ КОМКИ: маленькие → постепенно растут до PILE_MAX_RADIUS
+    const MAX_PILES = 4;
+    const PILE_MAX_RADIUS = 15;             // ⬅️ финальный размер (как раньше)
+    const PILE_START_RATIO = 0.4;           // ⬅️ старт с 40% от финала
+    const PILE_GROW_TIME = 3.0;             // ⬅️ растёт за 3 секунды
+    const MIN_PILE_GAP = 80;
+    const MIN_PILE_DISTANCE = PILE_MAX_RADIUS * 2 + MIN_PILE_GAP;
+
+    // 🐈 КОТЫ
+    const CAT_BASE_SPEED = 1.2;
+    const CAT_SPEED_PER_LEVEL = 0.25;
+    const CAT_BASE_PUSH = 0.06;
+    const CAT_PUSH_PER_LEVEL = 0.015;
+
+    // 🗑 МУСОР
+    const TRASH_FRICTION = 0.82;
+    const MAX_TRASH_SPEED = 4;
+    const TRASH_STOP_THRESHOLD = 0.15;
+
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     const timeEl = document.getElementById('time');
@@ -88,31 +106,42 @@
     const messageEl = document.getElementById('message');
     const msgTitle = document.getElementById('msgTitle');
     const actionBtn = document.getElementById('actionBtn');
+    const resetBtn = document.getElementById('resetBtn');
 
-    let SCALE = 1;
-    let SIZE_MULT = 1;
+    let SCALE = 1, SIZE_MULT = 1;
     let GROUND_MIN_X = 0, GROUND_MAX_X = 0, GROUND_MIN_Y = 0, GROUND_MAX_Y = 0;
     let player = { x: 100, y: 550, speed: 7.5 };
-    let trashes = [];
-    let cats = [];
-    let keys = {};
+    let trashes = [], cats = [], keys = {};
     let touch = { active: false, startX: 0, startY: 0, curX: 0, curY: 0 };
+    let gameActive = false, isWinState = false;
+    let currentLevel = 1, timeLeft = LEVEL_TIME;
+    let timerInterval = null, walkCycle = 0, raiseHandsTimer = 0;
+    let snowFlakes = [], snowPiles = [], snowSpawnCounter = 0;
 
-    let gameActive = false;
-    let isWinState = false;
-    let currentLevel = 1;
-    let timeLeft = 18;
-    let timerInterval = null;
-    let walkCycle = 0;
-    let raiseHandsTimer = 0;
+    function loadProgress() {
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                const n = parseInt(saved, 10);
+                if (!isNaN(n) && n > 0) return n;
+            }
+        } catch (e) {}
+        return 1;
+    }
+    function saveProgress(level) {
+        try { localStorage.setItem(STORAGE_KEY, level); } catch (e) {}
+    }
+    function resetProgress() {
+        if (!confirm('Сбросить прогресс и начать с 1-го уровня?')) return;
+        try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+        currentLevel = 1;
+        saveProgress(1);
+        messageEl.style.display = 'none';
+        setupLevel();
+    }
 
-    // ============================================================
-    // 2. ФОН + РАЗМЕР ОБЪЕКТОВ
-    // ============================================================
     let bgImage = new Image();
-    let bgLoaded = false;
-    let currentBgSrc = '';
-    let isMobileDevice = false;
+    let bgLoaded = false, currentBgSrc = '', isMobileDevice = false;
 
     function detectMobile() {
         const ua = /Android|iPhone|iPad|iPod|Mobile|Windows Phone|webOS|BlackBerry|Opera Mini/i.test(navigator.userAgent);
@@ -123,108 +152,181 @@
     function loadBackground() {
         isMobileDevice = detectMobile();
         SIZE_MULT = isMobileDevice ? 2.5 : 1.0;
-
         const src = isMobileDevice ? 'mob.jpg' : 'bg.jpg';
         if (src === currentBgSrc) return;
         currentBgSrc = src;
         bgLoaded = false;
-
-        console.log(`[BG] ${isMobileDevice ? 'MOBILE' : 'DESKTOP'} → ${src}, SIZE_MULT = ${SIZE_MULT}`);
-
         bgImage = new Image();
-        bgImage.onload = () => {
-            bgLoaded = true;
-            console.log(`[BG] ✓ ${src} (${bgImage.width}×${bgImage.height}), режим: ${BG_FIT_MODE}`);
-            if (!gameActive) draw();
-        };
+        bgImage.onload = () => { bgLoaded = true; if (!gameActive) draw(); };
         bgImage.onerror = () => {
-            console.warn(`[BG] ✗ ${src} не найден, пробую fallback`);
             const fallback = src === 'mob.jpg' ? 'bg.jpg' : 'mob.jpg';
-            if (bgImage.dataset.fallbackTried) {
-                alert(`Не найдены ни ${src}, ни ${fallback}!\n\nПоместите оба файла рядом с game.html.`);
-                bgLoaded = false;
-                return;
-            }
+            if (bgImage.dataset.fallbackTried) { alert(`Не найдены ни ${src}, ни ${fallback}!\nПоложите оба файла рядом с game.html.`); return; }
             bgImage.dataset.fallbackTried = '1';
             bgImage.src = fallback;
         };
         bgImage.src = src;
     }
 
-    // ============================================================
-    // 3. РИСОВАНИЕ ФОНА БЕЗ ИСКАЖЕНИЙ
-    // ============================================================
     function drawBackground() {
-        if (!bgLoaded) {
-            ctx.fillStyle = '#333';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            return;
-        }
-
-        // 'stretch' — растянуть на весь экран (с искажениями)
-        if (BG_FIT_MODE === 'stretch') {
-            ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
-            return;
-        }
-
+        if (!bgLoaded) { ctx.fillStyle = '#333'; ctx.fillRect(0, 0, canvas.width, canvas.height); return; }
+        if (BG_FIT_MODE === 'stretch') { ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height); return; }
         const imgRatio = bgImage.width / bgImage.height;
         const canvasRatio = canvas.width / canvas.height;
-
         let drawW, drawH, offsetX, offsetY;
-
         if (BG_FIT_MODE === 'cover') {
-            // Заполняет экран, обрезая излишки — БЕЗ искажений
             if (imgRatio > canvasRatio) {
-                // Картинка шире экрана: подгоняем по высоте, обрезаем по бокам
-                drawH = canvas.height;
-                drawW = canvas.height * imgRatio;
-                offsetX = (canvas.width - drawW) / 2;
-                offsetY = 0;
+                drawH = canvas.height; drawW = canvas.height * imgRatio;
+                offsetX = (canvas.width - drawW) / 2; offsetY = 0;
             } else {
-                // Картинка выше экрана: подгоняем по ширине, обрезаем сверху/снизу
-                drawW = canvas.width;
-                drawH = canvas.width / imgRatio;
-                offsetX = 0;
-                offsetY = (canvas.height - drawH) / 2;
+                drawW = canvas.width; drawH = canvas.width / imgRatio;
+                offsetX = 0; offsetY = (canvas.height - drawH) / 2;
             }
-        } else { // 'contain'
-            // Вся картинка видна — БЕЗ искажений, но с полями
+        } else {
             if (imgRatio > canvasRatio) {
-                drawW = canvas.width;
-                drawH = canvas.width / imgRatio;
-                offsetX = 0;
-                offsetY = (canvas.height - drawH) / 2;
+                drawW = canvas.width; drawH = canvas.width / imgRatio;
+                offsetX = 0; offsetY = (canvas.height - drawH) / 2;
             } else {
-                drawH = canvas.height;
-                drawW = canvas.height * imgRatio;
-                offsetX = (canvas.width - drawW) / 2;
-                offsetY = 0;
+                drawH = canvas.height; drawW = canvas.height * imgRatio;
+                offsetX = (canvas.width - drawW) / 2; offsetY = 0;
             }
         }
-
         ctx.drawImage(bgImage, offsetX, offsetY, drawW, drawH);
     }
 
-    // ============================================================
-    // 4. ОСТАЛЬНАЯ ИГРА
-    // ============================================================
     function resizeCanvas() {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        canvas.width = w;
-        canvas.height = h;
-        canvas.style.width = w + 'px';
-        canvas.style.height = h + 'px';
-
+        const w = window.innerWidth, h = window.innerHeight;
+        canvas.width = w; canvas.height = h;
+        canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
         SCALE = w / 1000;
         GROUND_MIN_X = w * 0.02;
         GROUND_MAX_X = w * 0.98;
         GROUND_MIN_Y = h * 0.68;
         GROUND_MAX_Y = h * 0.95;
         player.speed = 7.5 * SCALE;
-
         player.x = Math.max(GROUND_MIN_X, Math.min(GROUND_MAX_X, player.x));
         player.y = Math.max(GROUND_MIN_Y + 40 * SCALE, Math.min(GROUND_MAX_Y, player.y));
+    }
+
+    class Snowflake {
+        constructor() {
+            const areaTop = GROUND_MIN_Y + 40 * SCALE;
+            const areaBottom = GROUND_MAX_Y;
+            this.targetY = areaTop + Math.random() * (areaBottom - areaTop);
+            this.targetX = GROUND_MIN_X + 30 * SCALE + Math.random() * (GROUND_MAX_X - GROUND_MIN_X - 60 * SCALE);
+            this.x = this.targetX + (Math.random() - 0.5) * 30 * SCALE;
+            this.y = GROUND_MIN_Y - 40 * SCALE - Math.random() * 60 * SCALE;
+            this.size = (Math.random() * 3 + 2) * SCALE * SIZE_MULT * 0.55;
+            this.vy = (SNOW_FALL_SPEED + Math.random() * 2) * SCALE * SIZE_MULT * 0.5;
+            this.vx = (Math.random() - 0.5) * 0.3 * SCALE;
+        }
+        update() {
+            this.x += this.vx; this.y += this.vy;
+            if (this.y >= this.targetY) { trySpawnPile(this.targetX, this.targetY); return false; }
+            return true;
+        }
+        draw() {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill();
+        }
+    }
+
+    class SnowPile {
+        constructor(x, y) {
+            this.x = x;
+            this.y = y;
+            // 🎯 Финальный размер (не превысит PILE_MAX_RADIUS)
+            this.maxSize = PILE_MAX_RADIUS * SCALE * SIZE_MULT;
+            // 🎯 Стартовый размер — 40% от финала
+            this.size = this.maxSize * PILE_START_RATIO;
+            // 🎯 Скорость роста: дорастает до maxSize за PILE_GROW_TIME
+            // 60 FPS → 60 * PILE_GROW_TIME кадров на полный рост
+            this.growthSpeed = (this.maxSize * (1 - PILE_START_RATIO)) / (60 * PILE_GROW_TIME);
+        }
+        update() {
+            if (this.size < this.maxSize) {
+                this.size = Math.min(this.size + this.growthSpeed, this.maxSize);
+            }
+        }
+        draw() {
+            const sz = this.size;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.beginPath();
+            ctx.ellipse(this.x, this.y + sz * 0.35, sz * 1.1, sz * 0.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#eaf3ff';
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, sz, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(this.x - sz * 0.2, this.y - sz * 0.15, sz * 0.7, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.beginPath();
+            ctx.arc(this.x - sz * 0.35, this.y - sz * 0.4, sz * 0.25, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    function isFarFromAllPiles(x, y) {
+        // Проверяем по МАКСИМАЛЬНОМУ размеру, чтобы при росте комки не пересекались
+        const minDist = MIN_PILE_DISTANCE * SCALE * SIZE_MULT;
+        for (let pile of snowPiles) {
+            if (Math.hypot(pile.x - x, pile.y - y) < minDist) return false;
+        }
+        return true;
+    }
+
+    function trySpawnPile(x, y) {
+        if (Math.hypot(x - player.x, y - player.y) < 35 * SCALE * SIZE_MULT) return;
+        if (snowPiles.length >= MAX_PILES) return;
+        if (!isFarFromAllPiles(x, y)) return;
+        snowPiles.push(new SnowPile(x, y));
+    }
+
+    function updateSnow() {
+        snowSpawnCounter++;
+        if (snowSpawnCounter >= SNOW_SPAWN_RATE) {
+            snowSpawnCounter = 0;
+            const clumpSize = 1 + Math.floor(Math.random() * SNOW_CLUMP_SIZE);
+            for (let i = 0; i < clumpSize; i++) snowFlakes.push(new Snowflake());
+        }
+        for (let i = snowFlakes.length - 1; i >= 0; i--) {
+            if (!snowFlakes[i].update()) snowFlakes.splice(i, 1);
+        }
+    }
+
+    function isInsidePile(x, y, radius) {
+        for (let pile of snowPiles) {
+            if (Math.hypot(pile.x - x, pile.y - y) < pile.size + radius * 0.7) return true;
+        }
+        return false;
+    }
+
+    function canMoveTo(newX, newY) {
+        if (newX < GROUND_MIN_X + 10 * SCALE) return false;
+        if (newX > GROUND_MAX_X - 10 * SCALE) return false;
+        if (newY < GROUND_MIN_Y + 40 * SCALE) return false;
+        if (newY > GROUND_MAX_Y) return false;
+        const playerRadius = 12 * SCALE * SIZE_MULT;
+        if (isInsidePile(player.x, player.y, playerRadius)) return true;
+        if (isInsidePile(newX, newY, playerRadius)) return false;
+        return true;
+    }
+
+    function processMovement(dx, dy) {
+        if (dx === 0 && dy === 0) { walkCycle = 0; return; }
+        const len = Math.hypot(dx, dy);
+        const stepX = (dx / len) * player.speed;
+        const stepY = (dy / len) * player.speed;
+        const canBoth = canMoveTo(player.x + stepX, player.y + stepY);
+        if (canBoth) {
+            player.x += stepX; player.y += stepY;
+        } else {
+            if (canMoveTo(player.x + stepX, player.y)) player.x += stepX;
+            if (canMoveTo(player.x, player.y + stepY)) player.y += stepY;
+        }
+        walkCycle += 0.2;
     }
 
     class Trash {
@@ -243,8 +345,15 @@
             this.type = types[Math.floor(Math.random() * types.length)];
         }
         update() {
-            this.vx *= 0.90;
-            this.vy *= 0.90;
+            this.vx *= TRASH_FRICTION;
+            this.vy *= TRASH_FRICTION;
+            if (Math.abs(this.vx) < TRASH_STOP_THRESHOLD) this.vx = 0;
+            if (Math.abs(this.vy) < TRASH_STOP_THRESHOLD) this.vy = 0;
+            const speed = Math.hypot(this.vx, this.vy);
+            if (speed > MAX_TRASH_SPEED) {
+                this.vx = (this.vx / speed) * MAX_TRASH_SPEED;
+                this.vy = (this.vy / speed) * MAX_TRASH_SPEED;
+            }
             this.x += this.vx;
             this.y += this.vy;
             if (!this.isOnCar) {
@@ -256,9 +365,7 @@
         }
         draw() {
             ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-            ctx.beginPath();
-            ctx.ellipse(this.x, this.y + this.size/2, this.size/1.5, this.size/3, 0, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.beginPath(); ctx.ellipse(this.x, this.y + this.size/2, this.size/1.5, this.size/3, 0, 0, Math.PI * 2); ctx.fill();
             ctx.fillStyle = '#000';
             ctx.font = `${this.size}px Arial`;
             ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -271,18 +378,16 @@
             this.size = 35 * SCALE * SIZE_MULT;
             this.x = Math.random() * (GROUND_MAX_X - GROUND_MIN_X) + GROUND_MIN_X;
             this.y = Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y) + GROUND_MIN_Y;
-            this.speed = speed;
-            this.pushPower = pushPower;
+            this.speed = speed; this.pushPower = pushPower;
             this.vx = (Math.random() - 0.5) * this.speed;
             this.vy = (Math.random() - 0.5) * this.speed;
         }
         update() {
-            if (Math.random() < 0.025) {
+            if (Math.random() < 0.015) {
                 this.vx = (Math.random() - 0.5) * this.speed;
                 this.vy = (Math.random() - 0.5) * this.speed;
             }
-            this.x += this.vx;
-            this.y += this.vy;
+            this.x += this.vx; this.y += this.vy;
             if (this.x < GROUND_MIN_X) { this.x = GROUND_MIN_X; this.vx *= -1; }
             if (this.x > GROUND_MAX_X) { this.x = GROUND_MAX_X; this.vx *= -1; }
             if (this.y < GROUND_MIN_Y) { this.y = GROUND_MIN_Y; this.vy *= -1; }
@@ -298,13 +403,9 @@
             });
         }
         draw() {
-            const shadowW = this.size * 0.57;
-            const shadowH = this.size * 0.23;
-            const shadowY = this.size * 0.43;
+            const shadowW = this.size * 0.57, shadowH = this.size * 0.23, shadowY = this.size * 0.43;
             ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-            ctx.beginPath();
-            ctx.ellipse(this.x, this.y + shadowY, shadowW, shadowH, 0, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.beginPath(); ctx.ellipse(this.x, this.y + shadowY, shadowW, shadowH, 0, 0, Math.PI * 2); ctx.fill();
             ctx.fillStyle = '#000';
             ctx.font = `${this.size}px Arial`;
             ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -314,28 +415,25 @@
 
     function setupLevel() {
         const levelConfig = {
-            time: 18 + ((currentLevel - 1) * 3),
+            time: LEVEL_TIME,
             trashCount: 8 + (currentLevel * 4),
             catCount: Math.min(2 + currentLevel, 7),
-            catSpeed: (2.2 + (currentLevel * 0.6)) * SCALE,
-            pushPower: 0.2 + (currentLevel * 0.05)
+            catSpeed: (CAT_BASE_SPEED + (currentLevel * CAT_SPEED_PER_LEVEL)) * SCALE,
+            pushPower: CAT_BASE_PUSH + (currentLevel * CAT_PUSH_PER_LEVEL)
         };
-
         timeLeft = levelConfig.time;
         trashes = []; cats = []; raiseHandsTimer = 0;
-
+        snowFlakes = []; snowPiles = []; snowSpawnCounter = 0;
         player.x = GROUND_MIN_X + 50 * SCALE;
         player.y = GROUND_MAX_Y;
-
         for (let i = 0; i < 2; i++) trashes.push(new Trash(true));
         for (let i = 2; i < levelConfig.trashCount; i++) trashes.push(new Trash(false));
         for (let i = 0; i < levelConfig.catCount; i++) cats.push(new Cat(levelConfig.catSpeed, levelConfig.pushPower));
-
         levelEl.innerText = currentLevel;
         trashCountEl.innerText = trashes.length;
         timeEl.innerText = Math.ceil(timeLeft);
         timeEl.classList.remove('time-warning');
-
+        saveProgress(currentLevel);
         gameActive = true;
         clearInterval(timerInterval);
         timerInterval = setInterval(() => {
@@ -347,14 +445,10 @@
                 if (timeLeft <= 0) endGame(false);
             }
         }, 1000);
-
         requestAnimationFrame(gameLoop);
     }
 
-    function startGame() {
-        messageEl.style.display = 'none';
-        setupLevel();
-    }
+    function startGame() { messageEl.style.display = 'none'; setupLevel(); }
 
     function endGame(isWin) {
         gameActive = false; isWinState = isWin;
@@ -363,26 +457,25 @@
         if (isWin) {
             msgTitle.innerText = `🎉 Уровень ${currentLevel} пройден!`;
             msgTitle.style.color = "#4CAF50";
-            actionBtn.innerText = "Следующий уровень";
+            actionBtn.innerText = `▶ Следующий уровень (${currentLevel + 1})`;
+            resetBtn.style.display = 'none';
         } else {
-            msgTitle.innerText = "💀 Время вышло!";
+            msgTitle.innerText = `💀 Время вышло!\nУровень ${currentLevel} не пройден`;
             msgTitle.style.color = "#f44336";
-            actionBtn.innerText = "Начать сначала";
+            actionBtn.innerText = `🔄 Продолжить с уровня ${currentLevel}`;
+            resetBtn.style.display = 'inline-block';
         }
     }
 
     function handleButtonClick() {
         if (isWinState) currentLevel++;
-        else currentLevel = 1;
         startGame();
     }
 
     function drawJanitor(x, y) {
         const s = SCALE * SIZE_MULT;
-
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.beginPath(); ctx.ellipse(x, y + 5*s, 22*s, 10*s, 0, 0, Math.PI * 2); ctx.fill();
-
         let legOffset = Math.sin(walkCycle) * 5 * s;
         ctx.fillStyle = "#2c3e50";
         ctx.fillRect(x - 12*s, y - 25*s, 8*s, 25*s + legOffset);
@@ -390,7 +483,6 @@
         ctx.fillStyle = "#1a1a1a";
         ctx.fillRect(x - 14*s, y - 2*s + legOffset, 12*s, 6*s);
         ctx.fillRect(x + 2*s, y - 2*s - legOffset, 12*s, 6*s);
-
         ctx.fillStyle = "#2980b9";
         ctx.fillRect(x - 15*s, y - 60*s, 30*s, 35*s);
         ctx.fillStyle = "#e67e22";
@@ -398,7 +490,6 @@
         ctx.fillStyle = "#f1c40f";
         ctx.fillRect(x - 15*s, y - 45*s, 30*s, 4*s);
         ctx.fillRect(x - 15*s, y - 35*s, 30*s, 4*s);
-
         ctx.fillStyle = "#f1c40f";
         ctx.beginPath(); ctx.arc(x, y - 75*s, 12*s, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = "#c0392b";
@@ -406,7 +497,6 @@
         ctx.fillRect(x, y - 80*s, 16*s, 4*s);
         ctx.fillStyle = "#000";
         ctx.beginPath(); ctx.arc(x + 5*s, y - 76*s, 1.5*s, 0, Math.PI * 2); ctx.fill();
-
         if (raiseHandsTimer > 0) {
             ctx.fillStyle = "#2980b9";
             ctx.fillRect(x - 20*s, y - 80*s, 8*s, 20*s);
@@ -445,13 +535,11 @@
 
     function update() {
         if (!gameActive) return;
-
         let dx = 0, dy = 0;
         if (keys['ArrowUp'] || keys['w'] || keys['W']) dy -= 1;
         if (keys['ArrowDown'] || keys['s'] || keys['S']) dy += 1;
         if (keys['ArrowLeft'] || keys['a'] || keys['A']) dx -= 1;
         if (keys['ArrowRight'] || keys['d'] || keys['D']) dx += 1;
-
         if (touch.active) {
             const dz = 15 * SCALE;
             const tdx = touch.curX - touch.startX;
@@ -459,42 +547,26 @@
             if (Math.abs(tdx) > dz) dx += Math.sign(tdx);
             if (Math.abs(tdy) > dz) dy += Math.sign(tdy);
         }
+        processMovement(dx, dy);
+        updateSnow();
 
-        if (dx !== 0 || dy !== 0) {
-            const len = Math.hypot(dx, dy);
-            player.x += (dx / len) * player.speed;
-            player.y += (dy / len) * player.speed;
-            walkCycle += 0.2;
-        } else {
-            walkCycle = 0;
-        }
-
-        if (player.x < GROUND_MIN_X) player.x = GROUND_MIN_X;
-        if (player.x > GROUND_MAX_X) player.x = GROUND_MAX_X;
-        if (player.y < GROUND_MIN_Y + 40 * SCALE) player.y = GROUND_MIN_Y + 40 * SCALE;
-        if (player.y > GROUND_MAX_Y) player.y = GROUND_MAX_Y;
+        // ❄️ Обновляем рост сугробов
+        snowPiles.forEach(p => p.update());
 
         const s = SCALE * SIZE_MULT;
-
         for (let i = trashes.length - 1; i >= 0; i--) {
             trashes[i].update();
             let collected = false;
-
             if (trashes[i].isOnCar) {
                 const headY = player.y - 70 * s;
                 const dxCar = Math.abs(player.x - trashes[i].x);
                 const dyCar = Math.abs(headY - trashes[i].y);
-                if (dxCar < 120 * SCALE * SIZE_MULT && dyCar < 300 * SCALE * SIZE_MULT) {
-                    collected = true;
-                }
+                if (dxCar < 120 * SCALE * SIZE_MULT && dyCar < 300 * SCALE * SIZE_MULT) collected = true;
             } else {
                 const dxG = player.x - trashes[i].x;
                 const dyG = (player.y - 20 * s) - trashes[i].y;
-                if (Math.hypot(dxG, dyG) < 55 * SCALE * SIZE_MULT) {
-                    collected = true;
-                }
+                if (Math.hypot(dxG, dyG) < 55 * SCALE * SIZE_MULT) collected = true;
             }
-
             if (collected) {
                 if (trashes[i].isOnCar) raiseHandsTimer = 60;
                 trashes.splice(i, 1);
@@ -502,7 +574,6 @@
                 if (trashes.length === 0) endGame(true);
             }
         }
-
         cats.forEach(cat => cat.update());
         if (raiseHandsTimer > 0) raiseHandsTimer--;
     }
@@ -510,9 +581,11 @@
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         drawBackground();
+        snowPiles.forEach(p => p.draw());
         cats.forEach(cat => cat.draw());
         trashes.forEach(trash => trash.draw());
         drawJanitor(player.x, player.y);
+        snowFlakes.forEach(f => f.draw());
     }
 
     function gameLoop() {
@@ -522,20 +595,8 @@
         requestAnimationFrame(gameLoop);
     }
 
-    // ============================================================
-    // 5. СОБЫТИЯ
-    // ============================================================
-    window.addEventListener('resize', () => {
-        resizeCanvas();
-        loadBackground();
-        if (!gameActive) draw();
-    });
-    window.addEventListener('orientationchange', () => setTimeout(() => {
-        resizeCanvas();
-        loadBackground();
-        if (!gameActive) draw();
-    }, 150));
-
+    window.addEventListener('resize', () => { resizeCanvas(); loadBackground(); if (!gameActive) draw(); });
+    window.addEventListener('orientationchange', () => setTimeout(() => { resizeCanvas(); loadBackground(); if (!gameActive) draw(); }, 150));
     window.addEventListener('keydown', e => keys[e.key] = true);
     window.addEventListener('keyup', e => keys[e.key] = false);
 
@@ -558,17 +619,25 @@
     canvas.addEventListener('touchcancel', () => touch.active = false);
     canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-    // ============================================================
-    // 6. СТАРТ
-    // ============================================================
     resizeCanvas();
     loadBackground();
 
     window.onload = () => {
         resizeCanvas();
         loadBackground();
-        msgTitle.innerText = "Дворник: Очисти улицу";
-        actionBtn.innerText = "Начать игру";
+        currentLevel = loadProgress();
+        levelEl.innerText = currentLevel;
+        if (currentLevel > 1) {
+            msgTitle.innerText = `Продолжение с уровня ${currentLevel}`;
+            msgTitle.style.color = "#4CAF50";
+            actionBtn.innerText = `▶ Продолжить с уровня ${currentLevel}`;
+            resetBtn.style.display = 'inline-block';
+        } else {
+            msgTitle.innerText = "Дворник: Очисти улицу";
+            msgTitle.style.color = "white";
+            actionBtn.innerText = "▶ Начать игру";
+            resetBtn.style.display = 'none';
+        }
         messageEl.style.display = 'flex';
         draw();
     };
