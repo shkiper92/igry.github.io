@@ -17,11 +17,7 @@
             display: block;
             position: fixed;
             top: 0; left: 0;
-            background-image: url('bg.jpg');
-            background-size: 100% 100%;
-            background-position: center;
-            background-repeat: no-repeat;
-            background-color: #555;
+            background-color: #222;
         }
         #ui {
             position: fixed; top: 8px; left: 8px; right: 8px;
@@ -74,7 +70,7 @@
 
 <script>
     // ============================================================
-    // 1. ВСЕ ПЕРЕМЕННЫЕ И КОНСТАНТЫ — СНАЧАЛА
+    // 1. ПЕРЕМЕННЫЕ
     // ============================================================
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
@@ -85,8 +81,8 @@
     const msgTitle = document.getElementById('msgTitle');
     const actionBtn = document.getElementById('actionBtn');
 
-    // Игровое состояние
     let SCALE = 1;
+    let SIZE_MULT = 1;   // Множитель размера объектов (для мобильных)
     let GROUND_MIN_X = 0, GROUND_MAX_X = 0, GROUND_MIN_Y = 0, GROUND_MAX_Y = 0;
     let player = { x: 100, y: 550, speed: 7.5 };
     let trashes = [];
@@ -103,7 +99,55 @@
     let raiseHandsTimer = 0;
 
     // ============================================================
-    // 2. ФУНКЦИИ
+    // 2. ВЫБОР ФОНА + МНОЖИТЕЛЬ РАЗМЕРА
+    // ============================================================
+    let bgImage = new Image();
+    let bgLoaded = false;
+    let currentBgSrc = '';
+    let isMobileDevice = false;
+
+    function detectMobile() {
+        const ua = /Android|iPhone|iPad|iPod|Mobile|Windows Phone|webOS|BlackBerry|Opera Mini/i.test(navigator.userAgent);
+        const touchSmall = ('ontouchstart' in window) && Math.min(window.innerWidth, window.innerHeight) < 900;
+        return ua || touchSmall;
+    }
+
+    function loadBackground() {
+        isMobileDevice = detectMobile();
+
+        // 👇 ГЛАВНАЯ НАСТРОЙКА: во сколько раз крупнее объекты на мобильном
+        // 1.0 — как на ПК, 2.5 — крупнее в 2.5 раза, 3.0 — ещё больше
+        SIZE_MULT = isMobileDevice ? 2.5 : 1.0;
+
+        const src = isMobileDevice ? 'mob.jpg' : 'bg.jpg';
+        if (src === currentBgSrc) return;
+        currentBgSrc = src;
+        bgLoaded = false;
+
+        console.log(`[BG] ${isMobileDevice ? 'MOBILE' : 'DESKTOP'} → ${src}, SIZE_MULT = ${SIZE_MULT}`);
+
+        bgImage = new Image();
+        bgImage.onload = () => {
+            bgLoaded = true;
+            console.log(`[BG] ✓ загружен ${src} (${bgImage.width}×${bgImage.height})`);
+            if (!gameActive) draw();
+        };
+        bgImage.onerror = () => {
+            console.warn(`[BG] ✗ ${src} не найден, пробую fallback`);
+            const fallback = src === 'mob.jpg' ? 'bg.jpg' : 'mob.jpg';
+            if (bgImage.dataset.fallbackTried) {
+                alert(`Не найдены ни ${src}, ни ${fallback}!\n\nПоместите оба файла рядом с game.html.`);
+                bgLoaded = false;
+                return;
+            }
+            bgImage.dataset.fallbackTried = '1';
+            bgImage.src = fallback;
+        };
+        bgImage.src = src;
+    }
+
+    // ============================================================
+    // 3. ФУНКЦИИ ИГРЫ
     // ============================================================
     function resizeCanvas() {
         const w = window.innerWidth;
@@ -118,9 +162,10 @@
         GROUND_MAX_X = w * 0.98;
         GROUND_MIN_Y = h * 0.68;
         GROUND_MAX_Y = h * 0.95;
+
+        // Скорость дворника — от SCALE (размер объектов не влияет)
         player.speed = 7.5 * SCALE;
 
-        // Держим игрока внутри поля
         player.x = Math.max(GROUND_MIN_X, Math.min(GROUND_MAX_X, player.x));
         player.y = Math.max(GROUND_MIN_Y + 40 * SCALE, Math.min(GROUND_MAX_Y, player.y));
     }
@@ -128,7 +173,9 @@
     class Trash {
         constructor(isOnCar = false) {
             this.isOnCar = isOnCar;
-            this.size = (Math.random() * 10 + 20) * SCALE;
+            // 👇 размер мусора × SIZE_MULT
+            this.size = (Math.random() * 10 + 20) * SCALE * SIZE_MULT;
+
             if (isOnCar) {
                 this.x = canvas.width * (0.74 + Math.random() * 0.13);
                 this.y = canvas.height * (0.66 + Math.random() * 0.08);
@@ -166,7 +213,8 @@
 
     class Cat {
         constructor(speed, pushPower) {
-            this.size = 35 * SCALE;
+            // 👇 размер кота × SIZE_MULT
+            this.size = 35 * SCALE * SIZE_MULT;
             this.x = Math.random() * (GROUND_MAX_X - GROUND_MIN_X) + GROUND_MIN_X;
             this.y = Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y) + GROUND_MIN_Y;
             this.speed = speed;
@@ -196,12 +244,15 @@
             });
         }
         draw() {
+            const shadowW = this.size * 0.57;
+            const shadowH = this.size * 0.23;
+            const shadowY = this.size * 0.43;
             ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
             ctx.beginPath();
-            ctx.ellipse(this.x, this.y + 15 * SCALE, 20 * SCALE, 8 * SCALE, 0, 0, Math.PI * 2);
+            ctx.ellipse(this.x, this.y + shadowY, shadowW, shadowH, 0, 0, Math.PI * 2);
             ctx.fill();
             ctx.fillStyle = '#000';
-            ctx.font = `${35 * SCALE}px Arial`;
+            ctx.font = `${this.size}px Arial`;
             ctx.textAlign = "center"; ctx.textBaseline = "middle";
             ctx.fillText("🐈", this.x, this.y);
         }
@@ -273,7 +324,9 @@
     }
 
     function drawJanitor(x, y) {
-        const s = SCALE;
+        // 👇 размер дворника × SIZE_MULT
+        const s = SCALE * SIZE_MULT;
+
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.beginPath(); ctx.ellipse(x, y + 5*s, 22*s, 10*s, 0, 0, Math.PI * 2); ctx.fill();
 
@@ -346,7 +399,6 @@
         if (keys['ArrowLeft'] || keys['a'] || keys['A']) dx -= 1;
         if (keys['ArrowRight'] || keys['d'] || keys['D']) dx += 1;
 
-        // Тач-управление (свайп)
         if (touch.active) {
             const dz = 15 * SCALE;
             const tdx = touch.curX - touch.startX;
@@ -369,12 +421,31 @@
         if (player.y < GROUND_MIN_Y + 40 * SCALE) player.y = GROUND_MIN_Y + 40 * SCALE;
         if (player.y > GROUND_MAX_Y) player.y = GROUND_MAX_Y;
 
+        // ===== СБОР МУСОРА =====
+        const s = SCALE * SIZE_MULT;
+
         for (let i = trashes.length - 1; i >= 0; i--) {
             trashes[i].update();
-            let refY = trashes[i].isOnCar ? (player.y - 70 * SCALE) : (player.y - 20 * SCALE);
-            let radius = trashes[i].isOnCar ? 100 * SCALE : 50 * SCALE;
-            let dist = Math.hypot(player.x - trashes[i].x, refY - trashes[i].y);
-            if (dist < radius) {
+            let collected = false;
+
+            if (trashes[i].isOnCar) {
+                // Мусор на фургоне: тянемся вверх (голова), широкий допуск
+                const headY = player.y - 70 * s;
+                const dxCar = Math.abs(player.x - trashes[i].x);
+                const dyCar = Math.abs(headY - trashes[i].y);
+                if (dxCar < 120 * SCALE * SIZE_MULT && dyCar < 300 * SCALE * SIZE_MULT) {
+                    collected = true;
+                }
+            } else {
+                // Мусор на земле: центр тела
+                const dxG = player.x - trashes[i].x;
+                const dyG = (player.y - 20 * s) - trashes[i].y;
+                if (Math.hypot(dxG, dyG) < 55 * SCALE * SIZE_MULT) {
+                    collected = true;
+                }
+            }
+
+            if (collected) {
                 if (trashes[i].isOnCar) raiseHandsTimer = 60;
                 trashes.splice(i, 1);
                 trashCountEl.innerText = trashes.length;
@@ -388,6 +459,14 @@
 
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (bgLoaded) {
+            ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+        } else {
+            ctx.fillStyle = '#333';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
         cats.forEach(cat => cat.draw());
         trashes.forEach(trash => trash.draw());
         drawJanitor(player.x, player.y);
@@ -401,15 +480,22 @@
     }
 
     // ============================================================
-    // 3. ОБРАБОТЧИКИ СОБЫТИЙ
+    // 4. СОБЫТИЯ
     // ============================================================
-    window.addEventListener('resize', resizeCanvas);
-    window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 150));
+    window.addEventListener('resize', () => {
+        resizeCanvas();
+        loadBackground();
+        if (!gameActive) draw();
+    });
+    window.addEventListener('orientationchange', () => setTimeout(() => {
+        resizeCanvas();
+        loadBackground();
+        if (!gameActive) draw();
+    }, 150));
 
     window.addEventListener('keydown', e => keys[e.key] = true);
     window.addEventListener('keyup', e => keys[e.key] = false);
 
-    // Тач-управление на canvas
     function getCanvasPos(t) {
         const r = canvas.getBoundingClientRect();
         return { x: t.clientX - r.left, y: t.clientY - r.top };
@@ -430,23 +516,19 @@
     canvas.addEventListener('contextmenu', e => e.preventDefault());
 
     // ============================================================
-    // 4. ИНИЦИАЛИЗАЦИЯ (после того как всё объявлено)
+    // 5. ИНИЦИАЛИЗАЦИЯ
     // ============================================================
     resizeCanvas();
+    loadBackground();
 
     window.onload = () => {
         resizeCanvas();
+        loadBackground();
         msgTitle.innerText = "Дворник: Очисти улицу";
         actionBtn.innerText = "Начать игру";
         messageEl.style.display = 'flex';
-        // Рисуем начальную сцену: пустая дорога + дворник в углу
         draw();
     };
-
-    // Проверка наличия фона
-    const testImg = new Image();
-    testImg.src = 'bg.jpg';
-    testImg.onerror = () => alert('ВНИМАНИЕ: Файл "bg.jpg" не найден рядом с game.html!');
 </script>
 </body>
 </html>
