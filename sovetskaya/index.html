@@ -79,13 +79,17 @@
     const SNOW_CLUMP_SIZE = 2;
     const SNOW_FALL_SPEED = 3.5;
 
-    // ❄️ КОМКИ: маленькие → постепенно растут до PILE_MAX_RADIUS
+    // ❄️ КОМКИ
     const MAX_PILES = 4;
-    const PILE_MAX_RADIUS = 15;             // ⬅️ финальный размер (как раньше)
-    const PILE_START_RATIO = 0.4;           // ⬅️ старт с 40% от финала
-    const PILE_GROW_TIME = 3.0;             // ⬅️ растёт за 3 секунды
+    const PILE_MAX_RADIUS = 15;
+    const PILE_START_RATIO = 0.4;
+    const PILE_GROW_TIME = 3.0;
     const MIN_PILE_GAP = 80;
     const MIN_PILE_DISTANCE = PILE_MAX_RADIUS * 2 + MIN_PILE_GAP;
+
+    // 🏃 ДВОРНИК
+    const PLAYER_BASE_SPEED = 7.5;          // базовая скорость (ПК)
+    const MOBILE_SPEED_BOOST = 2.2;         // ⬅️ ускорение на мобильных
 
     // 🐈 КОТЫ
     const CAT_BASE_SPEED = 1.2;
@@ -110,7 +114,7 @@
 
     let SCALE = 1, SIZE_MULT = 1;
     let GROUND_MIN_X = 0, GROUND_MAX_X = 0, GROUND_MIN_Y = 0, GROUND_MAX_Y = 0;
-    let player = { x: 100, y: 550, speed: 7.5 };
+    let player = { x: 100, y: 550, speed: PLAYER_BASE_SPEED };
     let trashes = [], cats = [], keys = {};
     let touch = { active: false, startX: 0, startY: 0, curX: 0, curY: 0 };
     let gameActive = false, isWinState = false;
@@ -153,11 +157,19 @@
         isMobileDevice = detectMobile();
         SIZE_MULT = isMobileDevice ? 2.5 : 1.0;
         const src = isMobileDevice ? 'mob.jpg' : 'bg.jpg';
-        if (src === currentBgSrc) return;
+        if (src === currentBgSrc) {
+            // Даже если фон не изменился — пересчитаем скорость игрока (на случай смены категории)
+            updatePlayerSpeed();
+            return;
+        }
         currentBgSrc = src;
         bgLoaded = false;
         bgImage = new Image();
-        bgImage.onload = () => { bgLoaded = true; if (!gameActive) draw(); };
+        bgImage.onload = () => {
+            bgLoaded = true;
+            updatePlayerSpeed();     // ⬅️ обновляем скорость после загрузки
+            if (!gameActive) draw();
+        };
         bgImage.onerror = () => {
             const fallback = src === 'mob.jpg' ? 'bg.jpg' : 'mob.jpg';
             if (bgImage.dataset.fallbackTried) { alert(`Не найдены ни ${src}, ни ${fallback}!\nПоложите оба файла рядом с game.html.`); return; }
@@ -165,6 +177,14 @@
             bgImage.src = fallback;
         };
         bgImage.src = src;
+    }
+
+    // 🏃 Обновление скорости игрока (мобильные быстрее)
+    function updatePlayerSpeed() {
+        const mobile = detectMobile();
+        const boost = mobile ? MOBILE_SPEED_BOOST : 1.0;
+        player.speed = PLAYER_BASE_SPEED * SCALE * boost;
+        console.log(`[SPEED] ${mobile ? 'MOBILE' : 'DESKTOP'} → ${player.speed.toFixed(2)} px/frame (boost ${boost}x)`);
     }
 
     function drawBackground() {
@@ -202,7 +222,10 @@
         GROUND_MAX_X = w * 0.98;
         GROUND_MIN_Y = h * 0.68;
         GROUND_MAX_Y = h * 0.95;
-        player.speed = 7.5 * SCALE;
+
+        // 🏃 Скорость зависит от устройства
+        updatePlayerSpeed();
+
         player.x = Math.max(GROUND_MIN_X, Math.min(GROUND_MAX_X, player.x));
         player.y = Math.max(GROUND_MIN_Y + 40 * SCALE, Math.min(GROUND_MAX_Y, player.y));
     }
@@ -234,12 +257,8 @@
         constructor(x, y) {
             this.x = x;
             this.y = y;
-            // 🎯 Финальный размер (не превысит PILE_MAX_RADIUS)
             this.maxSize = PILE_MAX_RADIUS * SCALE * SIZE_MULT;
-            // 🎯 Стартовый размер — 40% от финала
             this.size = this.maxSize * PILE_START_RATIO;
-            // 🎯 Скорость роста: дорастает до maxSize за PILE_GROW_TIME
-            // 60 FPS → 60 * PILE_GROW_TIME кадров на полный рост
             this.growthSpeed = (this.maxSize * (1 - PILE_START_RATIO)) / (60 * PILE_GROW_TIME);
         }
         update() {
@@ -269,7 +288,6 @@
     }
 
     function isFarFromAllPiles(x, y) {
-        // Проверяем по МАКСИМАЛЬНОМУ размеру, чтобы при росте комки не пересекались
         const minDist = MIN_PILE_DISTANCE * SCALE * SIZE_MULT;
         for (let pile of snowPiles) {
             if (Math.hypot(pile.x - x, pile.y - y) < minDist) return false;
@@ -549,8 +567,6 @@
         }
         processMovement(dx, dy);
         updateSnow();
-
-        // ❄️ Обновляем рост сугробов
         snowPiles.forEach(p => p.update());
 
         const s = SCALE * SIZE_MULT;
